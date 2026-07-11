@@ -46,8 +46,8 @@ function doPost(e) {
     if (action === "updateIdentity") return handleUpdateIdentity(sheet, body);
     if (action === "createBusiness") return handleCreateBusiness(sheet, body);
     if (action === "deleteBusiness") return handleDeleteBusiness(sheet, body);
-    if (action === "createAppointment") return handleCreateAppointment(body);
-    if (action === "updateAppointment") return handleUpdateAppointment(body);
+    if (action === "createAppointment") return handleCreateAppointment(sheet, body);
+    if (action === "updateAppointment") return handleUpdateAppointment(sheet, body);
     if (action === "deleteAppointment") return handleDeleteAppointment(body);
     if (action === "createOverride") return handleCreateOverride(body);
     if (action === "deleteOverride") return handleDeleteOverride(body);
@@ -256,14 +256,17 @@ function findConflictingAppointment(sheet, negocio, usuario, fecha, inicioMin, d
 // Holds Google's script-wide lock for the whole check-then-write so two
 // near-simultaneous bookings for the same slot can't both succeed — the
 // second one re-reads the sheet (now including whatever the first one
-// just wrote) before deciding, not against a stale snapshot.
-function handleCreateAppointment(body) {
+// just wrote) before deciding, not against a stale snapshot. All business
+// rules (hours, vacations, overrides, overlaps, service duration) are
+// decided by validateAppointment — see that function for why.
+function handleCreateAppointment(identitySheet, body) {
   const id = String(body.id || Utilities.getUuid()).trim();
   const negocio = String(body.negocio || "").trim();
   const usuario = String(body.usuario || "").trim();
   const fecha = String(body.fecha || "").trim();
   const inicioMin = Number(body.inicioMin) || 0;
   const duracionMin = Number(body.duracionMin) || 0;
+  const servicio = String(body.servicio || "").trim();
   if (!id || !negocio || !usuario || !fecha || !duracionMin) {
     return jsonResponse({ ok: false, error: "missing fields" });
   }
@@ -276,12 +279,12 @@ function handleCreateAppointment(body) {
   }
 
   try {
-    const sheet = getOrCreateReservasSheet();
-    const conflict = findConflictingAppointment(sheet, negocio, usuario, fecha, inicioMin, duracionMin);
-    if (conflict) {
-      return jsonResponse({ ok: false, error: "slot_taken" });
+    const validation = validateAppointment(identitySheet, negocio, usuario, fecha, inicioMin, duracionMin, servicio, null);
+    if (!validation.ok) {
+      return jsonResponse({ ok: false, error: validation.error });
     }
 
+    const sheet = getOrCreateReservasSheet();
     const row = sheet.getLastRow() + 1;
     const range = sheet.getRange(row, 1, 1, RESERVAS_HEADERS.length);
     range.setNumberFormat("@");
@@ -311,11 +314,12 @@ function handleCreateAppointment(body) {
 // Used when the business reschedules an appointment from the app (e.g. the
 // auto-rebooking flow). Only touches the fields the caller actually sends.
 //
-// Holds the same script-wide lock as handleCreateAppointment, and re-checks
-// for overlaps if the move would actually change date/time — otherwise a
-// reschedule could silently land on top of another appointment with no
-// check at all (the previous version had none).
-function handleUpdateAppointment(body) {
+// Holds the same script-wide lock as handleCreateAppointment. Re-validates
+// through validateAppointment — the same authority handleCreateAppointment
+// uses — whenever the move actually changes date/time/duration/service;
+// pure status-only patches (e.g. marking "done") skip it since they can't
+// possibly create a new conflict or land outside business hours.
+function handleUpdateAppointment(identitySheet, body) {
   const id = String(body.id || "").trim();
   if (!id) return jsonResponse({ ok: false, error: "missing id" });
 
@@ -338,12 +342,14 @@ function handleUpdateAppointment(body) {
       const nextFecha = body.fecha != null ? String(body.fecha) : String(data[i][3]).trim();
       const nextInicio = body.inicioMin != null ? Number(body.inicioMin) : Number(data[i][4]) || 0;
       const nextDuracion = body.duracionMin != null ? Number(body.duracionMin) : Number(data[i][5]) || 0;
+      const nextServicio = body.servicio != null ? String(body.servicio) : String(data[i][6]).trim();
 
-      const movingTime = body.fecha != null || body.inicioMin != null || body.duracionMin != null;
-      if (movingTime) {
-        const conflict = findConflictingAppointment(sheet, negocio, usuario, nextFecha, nextInicio, nextDuracion, id);
-        if (conflict) {
-          return jsonResponse({ ok: false, error: "slot_taken" });
+      const needsValidation =
+        body.fecha != null || body.inicioMin != null || body.duracionMin != null || body.servicio != null;
+      if (needsValidation) {
+        const validation = validateAppointment(identitySheet, negocio, usuario, nextFecha, nextInicio, nextDuracion, nextServicio, id);
+        if (!validation.ok) {
+          return jsonResponse({ ok: false, error: validation.error });
         }
       }
 
@@ -463,6 +469,239 @@ function handleDeleteOverride(body) {
     }
   }
   return jsonResponse({ ok: false, error: "override not found" });
+}
+
+// --- Centralized appointment validation ---------------------------------
+//
+// validateAppointment is the single authority on whether a given
+// (negocio, usuario, fecha, inicioMin, duracionMin, servicio) can be
+// written to the Reservas sheet. Both handleCreateAppointment and
+// handleUpdateAppointment call this — under the same LockService lock
+// they already hold — instead of each re-implementing their own subset of
+// the rules. Any new business rule (cleanup buffer, daily appointment cap,
+// etc.) belongs inside this one function, not scattered across handlers.
+//
+// The parsing helpers below (stripAccents/parseHoursGAS/parseVacationLineGAS/
+// parseServiceLineGAS) mirror src/lib/data/sheets-provider.ts's
+// parseHours/parseVacationLine/parseServiceLine byte-for-byte in intent —
+// Apps Script can't import that TS module, so this is a hand-kept port.
+// If the Sheet's HORARIOS/VACACIONES/SERVICIOS text format ever changes on
+// the client side, this must be updated to match.
+
+const APPT_WEEKDAYS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"];
+
+const DIACRITIC_RANGE_START = 0x0300;
+const DIACRITIC_RANGE_END = 0x036f;
+
+function stripAccents(s) {
+  const normalized = s.normalize("NFD");
+  let out = "";
+  for (let i = 0; i < normalized.length; i++) {
+    const code = normalized.charCodeAt(i);
+    if (code >= DIACRITIC_RANGE_START && code <= DIACRITIC_RANGE_END) continue;
+    out += normalized[i];
+  }
+  return out;
+}
+
+function weekdayFromDateGAS(date) {
+  const index = (date.getDay() + 6) % 7;
+  return APPT_WEEKDAYS[index];
+}
+
+function parseDurationTokenGAS(token) {
+  const hMatch = token.match(/(\d+(?:[.,]\d+)?)\s*h/i);
+  const minMatch = token.match(/(\d+)\s*m(?:in)?/i);
+  let total = 0;
+  let matched = false;
+  if (hMatch) {
+    total += parseFloat(hMatch[1].replace(",", ".")) * 60;
+    matched = true;
+  }
+  if (minMatch) {
+    total += parseInt(minMatch[1], 10);
+    matched = true;
+  }
+  return matched ? Math.round(total) : null;
+}
+
+function parseServiceLineGAS(line) {
+  const parts = line
+    .split("·")
+    .map(function (p) { return p.trim(); })
+    .filter(function (p) { return p; });
+  if (parts.length === 0) return null;
+
+  const name = parts[0];
+  let durationPart = null;
+  for (let i = 0; i < parts.length; i++) {
+    if (/\d/.test(parts[i]) && /(min|h)\b/i.test(parts[i])) {
+      durationPart = parts[i];
+      break;
+    }
+  }
+  let pricePart = "";
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] !== name && parts[i] !== durationPart) {
+      pricePart = parts[i];
+      break;
+    }
+  }
+  const durationMin = durationPart ? parseDurationTokenGAS(durationPart) : null;
+  if (!name || durationMin == null) return null;
+
+  return { name: name, priceLabel: pricePart, durationMin: durationMin };
+}
+
+function parseHoursGAS(raw) {
+  const hours = {};
+  for (let i = 0; i < APPT_WEEKDAYS.length; i++) hours[APPT_WEEKDAYS[i]] = null;
+  if (!raw || !raw.trim()) return hours;
+
+  const segments = raw
+    .split(",")
+    .map(function (s) { return s.trim(); })
+    .filter(function (s) { return s; });
+
+  for (const seg of segments) {
+    const normalized = stripAccents(seg).toLowerCase();
+    let days = [];
+    let rest = normalized;
+
+    const rangeMatch = normalized.match(/^([a-z]+)\s+a\s+([a-z]+)\s+(.*)$/);
+    if (rangeMatch) {
+      const start = APPT_WEEKDAYS.indexOf(rangeMatch[1]);
+      const end = APPT_WEEKDAYS.indexOf(rangeMatch[2]);
+      if (start !== -1 && end !== -1 && start <= end) {
+        days = APPT_WEEKDAYS.slice(start, end + 1);
+        rest = rangeMatch[3];
+      }
+    }
+
+    if (days.length === 0) {
+      const singleMatch = normalized.match(/^([a-z]+)\s+(.*)$/);
+      const day = singleMatch ? singleMatch[1] : null;
+      if (day && APPT_WEEKDAYS.indexOf(day) !== -1) {
+        days = [day];
+        rest = singleMatch[2];
+      }
+    }
+
+    if (days.length === 0) continue;
+
+    if (/cerrado/.test(rest)) {
+      for (const d of days) hours[d] = null;
+      continue;
+    }
+
+    const timeMatch = rest.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
+    if (!timeMatch) continue;
+    const open = parseInt(timeMatch[1], 10) * 60 + parseInt(timeMatch[2], 10);
+    const close = parseInt(timeMatch[3], 10) * 60 + parseInt(timeMatch[4], 10);
+    for (const d of days) hours[d] = { open: open, close: close };
+  }
+
+  return hours;
+}
+
+function parseVacationLineGAS(line) {
+  const matches = line.match(/\d{2}\/\d{2}\/\d{4}/g);
+  if (!matches || matches.length === 0) return [];
+  function toIso(m) {
+    const parts = m.split("/");
+    return parts[2] + "-" + parts[1] + "-" + parts[0];
+  }
+  const start = toIso(matches[0]);
+  const end = matches[1] ? toIso(matches[1]) : start;
+  return [{ start: start, end: end }];
+}
+
+// The authority. Returns { ok: true } or { ok: false, error: "<code>" }.
+// Error codes: business_not_found, service_not_found, invalid_duration,
+// schedule_blocked, outside_hours, slot_taken.
+function validateAppointment(identitySheet, negocio, usuario, fecha, inicioMin, duracionMin, servicio, excludeId) {
+  const identityData = identitySheet.getDataRange().getValues();
+  const block = findBlock(identityData, negocio, usuario);
+  if (!block) {
+    return { ok: false, error: "business_not_found" };
+  }
+
+  const rawBlockRows = identityData.slice(block.startRow - 1, block.startRow - 1 + block.numRows);
+  const preserved = extractPreservedLines(rawBlockRows);
+
+  const services = preserved.servicios
+    .map(parseServiceLineGAS)
+    .filter(function (s) { return s !== null; });
+  const matchedService = services.filter(function (s) {
+    return s.name.toLowerCase() === servicio.toLowerCase();
+  })[0];
+  if (!matchedService) {
+    return { ok: false, error: "service_not_found" };
+  }
+  if (duracionMin !== matchedService.durationMin) {
+    return { ok: false, error: "invalid_duration" };
+  }
+
+  const hours = parseHoursGAS(preserved.horarios);
+  const vacations = preserved.vacaciones.reduce(function (acc, line) {
+    return acc.concat(parseVacationLineGAS(line));
+  }, []);
+
+  const dateParts = fecha.split("-").map(Number);
+  const dateObj = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+  const onVacation = vacations.some(function (v) { return fecha >= v.start && fecha <= v.end; });
+  let effectiveSchedule = onVacation ? null : hours[weekdayFromDateGAS(dateObj)];
+
+  const requestedEnd = inicioMin + duracionMin;
+
+  // Overrides: "closed"/"hours" replace the day's window, "block" carves
+  // out a sub-range — same composition rule as resolveDay() on the client
+  // (src/lib/data/schedule-overrides.ts).
+  const overridesSheet = getOrCreateOverridesSheet();
+  const overrideRows = overridesSheet.getDataRange().getValues();
+  const blockedRanges = [];
+  for (let i = 1; i < overrideRows.length; i++) {
+    const row = overrideRows[i];
+    if (String(row[1]).trim() !== negocio) continue;
+    if (String(row[2]).trim() !== usuario) continue;
+    if (String(row[3]).trim() !== fecha) continue;
+    const kind = String(row[4]).trim();
+    if (kind === "closed") {
+      effectiveSchedule = null;
+    } else if (kind === "hours") {
+      const openMin = row[5] !== "" ? Number(row[5]) : null;
+      const closeMin = row[6] !== "" ? Number(row[6]) : null;
+      if (openMin != null && closeMin != null) {
+        effectiveSchedule = { open: openMin, close: closeMin };
+      }
+    } else if (kind === "block") {
+      const blockStart = row[7] !== "" ? Number(row[7]) : null;
+      const blockEnd = row[8] !== "" ? Number(row[8]) : null;
+      if (blockStart != null && blockEnd != null) {
+        blockedRanges.push({ start: blockStart, end: blockEnd });
+      }
+    }
+  }
+
+  if (!effectiveSchedule) {
+    return { ok: false, error: "schedule_blocked" };
+  }
+  if (inicioMin < effectiveSchedule.open || requestedEnd > effectiveSchedule.close) {
+    return { ok: false, error: "outside_hours" };
+  }
+  for (const b of blockedRanges) {
+    if (rangesOverlap(inicioMin, requestedEnd, b.start, b.end)) {
+      return { ok: false, error: "schedule_blocked" };
+    }
+  }
+
+  const reservasSheet = getOrCreateReservasSheet();
+  const conflict = findConflictingAppointment(reservasSheet, negocio, usuario, fecha, inicioMin, duracionMin, excludeId);
+  if (conflict) {
+    return { ok: false, error: "slot_taken" };
+  }
+
+  return { ok: true };
 }
 
 // --- Helpers -----------------------------------------------------------
