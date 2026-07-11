@@ -6,9 +6,12 @@ export const dataProvider: DataProvider = sheetsProvider;
 
 export { scheduleForDate, weekdayFromDate } from "./schedule";
 export { resolveDay } from "./schedule-overrides";
+export { loadProfile, saveProfile } from "./profile-store";
+export { emptyProfile, emptyHours, isProfileConfigured, WEEKDAYS } from "./types";
 
 export type {
   Business,
+  BusinessProfile,
   BusinessService,
   DaySchedule,
   ScheduleOverride,

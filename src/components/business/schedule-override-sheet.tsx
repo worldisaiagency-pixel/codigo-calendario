@@ -39,7 +39,7 @@ export function ScheduleOverrideSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const business = useAppStore((s) => s.business);
+  const profile = useAppStore((s) => s.profile);
   const scheduleOverrides = useAppStore((s) => s.scheduleOverrides);
   const appointments = useAppStore((s) => s.appointments);
   const dogs = useAppStore((s) => s.dogs);
@@ -87,13 +87,13 @@ export function ScheduleOverrideSheet({
 
   const needsTimeRange = choice === "block" || choice === "extend" || choice === "modify";
   const canReview =
-    Boolean(business) &&
+    Boolean(profile) &&
     selectedDates.length > 0 &&
     choice !== null &&
     (!needsTimeRange || startTime < endTime);
 
   function handleReview() {
-    if (!business || !choice) return;
+    if (!profile || !choice) return;
     const kind: ScheduleOverrideKind =
       choice === "closed" ? "closed" : choice === "block" ? "block" : "hours";
 
@@ -118,7 +118,7 @@ export function ScheduleOverrideSheet({
     });
 
     const result = planScheduleChange({
-      business,
+      profile,
       existingOverrides: scheduleOverrides,
       pendingOverrides: overrides,
       appointments,

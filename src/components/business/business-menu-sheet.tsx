@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, LogOut, Trash2 } from "lucide-react";
+import { CalendarClock, LogOut, Trash2, UserCog } from "lucide-react";
 import {
   Drawer,
   DrawerContent,
@@ -29,6 +29,7 @@ export function BusinessMenuSheet({
   business,
   scheduleOverrides,
   onOpenScheduleEditor,
+  onOpenProfile,
   onLogout,
 }: {
   open: boolean;
@@ -36,6 +37,7 @@ export function BusinessMenuSheet({
   business: Business;
   scheduleOverrides: ScheduleOverride[];
   onOpenScheduleEditor: () => void;
+  onOpenProfile: () => void;
   onLogout: () => void;
 }) {
   const removeScheduleOverride = useAppStore((s) => s.removeScheduleOverride);
@@ -55,6 +57,16 @@ export function BusinessMenuSheet({
 
         <div className="px-4 pb-4 flex flex-col gap-6">
           <div className="rounded-2xl bg-secondary overflow-hidden divide-y divide-border/60">
+            <button
+              type="button"
+              onClick={onOpenProfile}
+              className="w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-accent transition-colors"
+            >
+              <span className="flex size-8 items-center justify-center rounded-full bg-slot-free-tint text-slot-free shrink-0">
+                <UserCog className="size-[17px]" strokeWidth={2} />
+              </span>
+              <span className="text-[15px] font-medium">Ver / configurar perfil</span>
+            </button>
             <button
               type="button"
               onClick={onOpenScheduleEditor}

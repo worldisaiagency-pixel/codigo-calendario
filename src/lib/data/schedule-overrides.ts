@@ -1,6 +1,6 @@
 import { scheduleForDate } from "./schedule";
 import { toDateKey } from "../time";
-import type { Business, DaySchedule, ScheduleOverride } from "./types";
+import type { BusinessProfile, DaySchedule, ScheduleOverride } from "./types";
 
 export interface ManualBlock {
   startMin: number;
@@ -20,14 +20,14 @@ export interface ResolvedDay {
  * overrides on the same date compose in order (later "closed"/"hours" wins,
  * "block" entries accumulate). */
 export function resolveDay(
-  business: Business,
+  profile: BusinessProfile,
   overrides: ScheduleOverride[],
   date: Date
 ): ResolvedDay {
   const dateKey = toDateKey(date);
   const dayOverrides = overrides.filter((o) => o.date === dateKey);
 
-  let schedule = scheduleForDate(business, date);
+  let schedule = scheduleForDate(profile, date);
   const blocks: ManualBlock[] = [];
 
   for (const o of dayOverrides) {

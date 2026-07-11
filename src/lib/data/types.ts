@@ -23,13 +23,42 @@ export interface VacationRange {
   end: string; // YYYY-MM-DD
 }
 
+/** Sourced from the Sheet — just enough to log in. Everything operational
+ * (services/hours/vacations) lives in BusinessProfile instead, configured
+ * in-app per device (see profile-store.ts). */
 export interface Business {
   id: string;
   name: string;
   username: string;
+}
+
+/** Configured by the business owner in-app (Ver perfil), stored locally per
+ * business — never sourced from the Sheet. */
+export interface BusinessProfile {
   services: BusinessService[];
   hours: Record<Weekday, DaySchedule | null>;
   vacations: VacationRange[];
+}
+
+export function emptyHours(): Record<Weekday, DaySchedule | null> {
+  return {
+    lunes: null,
+    martes: null,
+    miercoles: null,
+    jueves: null,
+    viernes: null,
+    sabado: null,
+    domingo: null,
+  };
+}
+
+export function emptyProfile(): BusinessProfile {
+  return { services: [], hours: emptyHours(), vacations: [] };
+}
+
+export function isProfileConfigured(profile: BusinessProfile): boolean {
+  const hasHours = Object.values(profile.hours).some((d) => d !== null);
+  return profile.services.length > 0 || hasHours || profile.vacations.length > 0;
 }
 
 export type ScheduleOverrideKind = "closed" | "hours" | "block";

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Appointment, Dog, Owner } from "./types";
-import type { Business, ScheduleOverride } from "./data";
+import type { Business, BusinessProfile, ScheduleOverride } from "./data";
+import { loadProfile, saveProfile } from "./data";
 import { toDateKey } from "./time";
 import { createLocalTable } from "./realtime/local-table";
 import type { RealtimeChangePayload, RealtimeTable } from "./realtime/types";
@@ -20,6 +21,7 @@ interface NewAppointmentInput {
 
 interface AppState {
   business: Business | null;
+  profile: BusinessProfile | null;
   appointments: Appointment[];
   dogs: Dog[];
   owners: Owner[];
@@ -36,6 +38,7 @@ interface AppState {
   updateAppointment: (id: string, patch: Partial<Appointment>) => void;
   addScheduleOverride: (override: Omit<ScheduleOverride, "id">) => ScheduleOverride;
   removeScheduleOverride: (id: string) => void;
+  updateProfile: (patch: Partial<BusinessProfile>) => void;
 }
 
 let seq = 1000;
@@ -63,8 +66,9 @@ function reduceList<T extends { id: string }>(
   return rows;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   business: null,
+  profile: null,
   appointments: [],
   dogs: [],
   owners: [],
@@ -83,6 +87,7 @@ export const useAppStore = create<AppState>((set) => ({
 
     set({
       business,
+      profile: loadProfile(business.id),
       appointments: appointmentsTable.list(),
       dogs: dogsTable.list(),
       owners: ownersTable.list(),
@@ -162,6 +167,14 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   removeScheduleOverride: (id) => scheduleOverridesTable?.remove(id),
+
+  updateProfile: (patch) => {
+    const { business, profile } = get();
+    if (!business || !profile) return;
+    const next = { ...profile, ...patch };
+    saveProfile(business.id, next);
+    set({ profile: next });
+  },
 }));
 
 export function selectedDateKey(state: Pick<AppState, "selectedDate">): string {

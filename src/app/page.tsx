@@ -16,10 +16,11 @@ import { GlobalSearch } from "@/components/search/global-search";
 import { LoginScreen } from "@/components/auth/login-screen";
 import { BusinessMenuSheet } from "@/components/business/business-menu-sheet";
 import { ScheduleOverrideSheet } from "@/components/business/schedule-override-sheet";
+import { ProfileSheet } from "@/components/business/profile-sheet";
 import { useAuth } from "@/lib/auth/use-auth";
 import { useAppStore } from "@/lib/store";
 import { buildRail } from "@/lib/rail";
-import { resolveDay } from "@/lib/data";
+import { resolveDay, isProfileConfigured } from "@/lib/data";
 import { isSameDay, toDateKey } from "@/lib/time";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useMounted } from "@/hooks/use-mounted";
@@ -36,6 +37,7 @@ import { toast } from "sonner";
 export default function Home() {
   const { status, login, logout } = useAuth();
   const business = useAppStore((s) => s.business);
+  const profile = useAppStore((s) => s.profile);
   const selectedDate = useAppStore((s) => s.selectedDate);
   const setSelectedDate = useAppStore((s) => s.setSelectedDate);
   const appointments = useAppStore((s) => s.appointments);
@@ -70,6 +72,7 @@ export default function Home() {
   const [availabilityOpen, setAvailabilityOpen] = useState(false);
   const [businessMenuOpen, setBusinessMenuOpen] = useState(false);
   const [scheduleEditorOpen, setScheduleEditorOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("day");
   // Safe to read synchronously: false on the server (guarded inside
   // isNotificationsEnabled), and the value is only ever rendered once
@@ -79,6 +82,18 @@ export default function Home() {
   );
 
   useAppointmentReminders(notificationsEnabled);
+
+  // First time this business logs in on this device, its profile
+  // (services/horarios/vacaciones) is empty — nudge straight to the profile
+  // screen instead of showing a silently "closed every day" calendar.
+  // Adjusting state during render (React's documented pattern) instead of an
+  // effect keeps this a single synchronous check per business, not a
+  // separate cascading render.
+  const [checkedProfileFor, setCheckedProfileFor] = useState<string | null>(null);
+  if (status === "authenticated" && business && profile && checkedProfileFor !== business.id) {
+    setCheckedProfileFor(business.id);
+    if (!isProfileConfigured(profile)) setProfileOpen(true);
+  }
 
   async function handleToggleNotifications() {
     if (!business) return;
@@ -113,8 +128,8 @@ export default function Home() {
   const dateKey = toDateKey(selectedDate);
   const isToday = isSameDay(selectedDate, new Date());
   const resolvedDay = useMemo(
-    () => (business ? resolveDay(business, scheduleOverrides, selectedDate) : null),
-    [business, scheduleOverrides, selectedDate]
+    () => (profile ? resolveDay(profile, scheduleOverrides, selectedDate) : null),
+    [profile, scheduleOverrides, selectedDate]
   );
   const schedule = resolvedDay?.schedule ?? null;
 
@@ -188,7 +203,7 @@ export default function Home() {
     );
   }
 
-  if (status === "unauthenticated" || !business) {
+  if (status === "unauthenticated" || !business || !profile) {
     return <LoginScreen onSuccess={login} />;
   }
 
@@ -230,7 +245,7 @@ export default function Home() {
         {viewMode === "week" && (
           <WeekView
             date={selectedDate}
-            business={business}
+            profile={profile}
             scheduleOverrides={scheduleOverrides}
             appointments={appointments}
             dogById={dogById}
@@ -251,14 +266,14 @@ export default function Home() {
 
       <NewAppointmentSheet
         slot={freeSlot}
-        services={business.services}
+        services={profile.services}
         onOpenChange={(open) => !open && setFreeSlot(null)}
       />
 
       <AvailabilitySheet
         open={availabilityOpen}
         onOpenChange={setAvailabilityOpen}
-        business={business}
+        profile={profile}
         scheduleOverrides={scheduleOverrides}
         appointments={appointments}
         dogById={dogById}
@@ -286,6 +301,10 @@ export default function Home() {
           setBusinessMenuOpen(false);
           setScheduleEditorOpen(true);
         }}
+        onOpenProfile={() => {
+          setBusinessMenuOpen(false);
+          setProfileOpen(true);
+        }}
         onLogout={logout}
       />
 
@@ -293,6 +312,8 @@ export default function Home() {
         open={scheduleEditorOpen}
         onOpenChange={setScheduleEditorOpen}
       />
+
+      <ProfileSheet open={profileOpen} onOpenChange={setProfileOpen} />
     </div>
   );
 }
