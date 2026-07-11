@@ -189,9 +189,13 @@ function handleDeleteBusiness(sheet, body) {
 // FECHA ("2026-07-15") as a real Date and reformats it on CSV export.
 
 const RESERVAS_SHEET_NAME = "Reservas";
+// EMAIL/NOTAS are appended at the end (not inserted between existing
+// columns) so every index-based read already in place (reservas-sync.ts,
+// handleUpdateAppointment below) keeps working unchanged.
 const RESERVAS_HEADERS = [
   "ID", "NEGOCIO", "USUARIO", "FECHA", "INICIO_MIN", "DURACION_MIN",
   "SERVICIO", "CLIENTE", "TELEFONO", "PERRO", "RAZA", "ESTADO", "ORIGEN",
+  "EMAIL", "NOTAS",
 ];
 
 function getOrCreateReservasSheet() {
@@ -200,42 +204,103 @@ function getOrCreateReservasSheet() {
   if (!sheet) {
     sheet = ss.insertSheet(RESERVAS_SHEET_NAME);
     sheet.appendRow(RESERVAS_HEADERS);
+    return sheet;
+  }
+  // Migration: a sheet created before EMAIL/NOTAS existed only has the
+  // first 13 header cells — fill in the rest so the columns are labeled.
+  if (sheet.getLastColumn() < RESERVAS_HEADERS.length) {
+    sheet
+      .getRange(1, sheet.getLastColumn() + 1, 1, RESERVAS_HEADERS.length - sheet.getLastColumn())
+      .setValues([RESERVAS_HEADERS.slice(sheet.getLastColumn())]);
   }
   return sheet;
 }
 
+// Minutes-since-midnight ranges [aStart,aEnd) and [bStart,bEnd) overlap.
+function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+// Re-reads the sheet fresh (called while holding the script lock, so this
+// reflects any write that just committed from a concurrent request) and
+// looks for any existing appointment for the same negocio+usuario+fecha
+// whose time range overlaps the requested one.
+function findConflictingAppointment(sheet, negocio, usuario, fecha, inicioMin, duracionMin) {
+  const data = sheet.getDataRange().getValues();
+  const requestedEnd = inicioMin + duracionMin;
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    if (String(row[1]).trim() !== negocio) continue;
+    if (String(row[2]).trim() !== usuario) continue;
+    if (String(row[3]).trim() !== fecha) continue;
+    const existingStart = Number(row[4]) || 0;
+    const existingEnd = existingStart + (Number(row[5]) || 0);
+    if (rangesOverlap(inicioMin, requestedEnd, existingStart, existingEnd)) {
+      return row[0];
+    }
+  }
+  return null;
+}
+
 // Created by either the business's own app or the public booking page
-// (see src/app/reservar). The caller always sends its own `id` (a UUID) so
-// retries/re-syncs stay idempotent instead of appending duplicates.
+// (see src/app/reservar, or a business's own site calling
+// create-appointment.ts directly). The caller always sends its own `id`
+// (a UUID) so retries/re-syncs stay idempotent instead of appending
+// duplicates.
+//
+// Holds Google's script-wide lock for the whole check-then-write so two
+// near-simultaneous bookings for the same slot can't both succeed — the
+// second one re-reads the sheet (now including whatever the first one
+// just wrote) before deciding, not against a stale snapshot.
 function handleCreateAppointment(body) {
   const id = String(body.id || Utilities.getUuid()).trim();
   const negocio = String(body.negocio || "").trim();
   const usuario = String(body.usuario || "").trim();
   const fecha = String(body.fecha || "").trim();
-  if (!id || !negocio || !usuario || !fecha) {
+  const inicioMin = Number(body.inicioMin) || 0;
+  const duracionMin = Number(body.duracionMin) || 0;
+  if (!id || !negocio || !usuario || !fecha || !duracionMin) {
     return jsonResponse({ ok: false, error: "missing fields" });
   }
 
-  const sheet = getOrCreateReservasSheet();
-  const row = sheet.getLastRow() + 1;
-  const range = sheet.getRange(row, 1, 1, RESERVAS_HEADERS.length);
-  range.setNumberFormat("@");
-  range.setValues([[
-    id,
-    negocio,
-    usuario,
-    fecha,
-    String(Number(body.inicioMin) || 0),
-    String(Number(body.duracionMin) || 0),
-    String(body.servicio || ""),
-    String(body.cliente || ""),
-    String(body.telefono || ""),
-    String(body.perro || ""),
-    String(body.raza || ""),
-    String(body.estado || "confirmed"),
-    String(body.origen || "app"),
-  ]]);
-  return jsonResponse({ ok: true, id: id });
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (err) {
+    return jsonResponse({ ok: false, error: "busy, try again" });
+  }
+
+  try {
+    const sheet = getOrCreateReservasSheet();
+    const conflict = findConflictingAppointment(sheet, negocio, usuario, fecha, inicioMin, duracionMin);
+    if (conflict) {
+      return jsonResponse({ ok: false, error: "slot_taken" });
+    }
+
+    const row = sheet.getLastRow() + 1;
+    const range = sheet.getRange(row, 1, 1, RESERVAS_HEADERS.length);
+    range.setNumberFormat("@");
+    range.setValues([[
+      id,
+      negocio,
+      usuario,
+      fecha,
+      String(inicioMin),
+      String(duracionMin),
+      String(body.servicio || ""),
+      String(body.cliente || ""),
+      String(body.telefono || ""),
+      String(body.perro || ""),
+      String(body.raza || ""),
+      String(body.estado || "confirmed"),
+      String(body.origen || "app"),
+      String(body.email || ""),
+      String(body.notas || ""),
+    ]]);
+    return jsonResponse({ ok: true, id: id });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Used when the business reschedules an appointment from the app (e.g. the
