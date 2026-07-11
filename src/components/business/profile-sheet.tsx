@@ -14,6 +14,7 @@ import { useAppStore } from "@/lib/store";
 import { WEEKDAYS, emptyProfile } from "@/lib/data";
 import type { BusinessService, DaySchedule, VacationRange, Weekday } from "@/lib/data";
 import { toDateKey } from "@/lib/time";
+import { toast } from "sonner";
 
 const WEEKDAY_LABELS: Record<Weekday, string> = {
   lunes: "Lunes",
@@ -43,7 +44,7 @@ export function ProfileSheet({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const profile = useAppStore((s) => s.profile);
+  const business = useAppStore((s) => s.business);
   const updateProfile = useAppStore((s) => s.updateProfile);
 
   const [services, setServices] = useState<BusinessService[]>([]);
@@ -51,16 +52,17 @@ export function ProfileSheet({
   const [vacations, setVacations] = useState<VacationRange[]>([]);
   const [vacStart, setVacStart] = useState("");
   const [vacEnd, setVacEnd] = useState("");
+  const [saving, setSaving] = useState(false);
 
   // Load the current profile into local edit state every time the sheet is
   // (re)opened — adjusting state during render keeps this synchronous.
   const [wasOpen, setWasOpen] = useState(false);
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open && profile) {
-      setServices(profile.services);
-      setHours(profile.hours);
-      setVacations(profile.vacations);
+    if (open && business) {
+      setServices(business.services);
+      setHours(business.hours);
+      setVacations(business.vacations);
       setVacStart("");
       setVacEnd("");
     }
@@ -99,10 +101,21 @@ export function ProfileSheet({
     setVacations((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  function handleSave() {
+  async function handleSave() {
     const cleanServices = services.filter((s) => s.name.trim().length > 0);
-    updateProfile({ services: cleanServices, hours, vacations });
-    onOpenChange(false);
+    setSaving(true);
+    const ok = await updateProfile({ services: cleanServices, hours, vacations });
+    setSaving(false);
+    if (ok) {
+      toast.success("Perfil guardado", {
+        description: "Los cambios ya están disponibles en cualquier dispositivo",
+      });
+      onOpenChange(false);
+    } else {
+      toast.error("No se pudo guardar en la hoja", {
+        description: "Revisa tu conexión e inténtalo de nuevo — tus cambios siguen aquí",
+      });
+    }
   }
 
   const todayKey = toDateKey(new Date());
@@ -285,10 +298,11 @@ export function ProfileSheet({
           <button
             type="button"
             onClick={handleSave}
-            className="w-full rounded-2xl text-[16px] font-semibold bg-primary text-primary-foreground transition-all duration-150 active:scale-[0.985]"
+            disabled={saving}
+            className="w-full rounded-2xl text-[16px] font-semibold bg-primary text-primary-foreground transition-all duration-150 active:scale-[0.985] disabled:opacity-60"
             style={{ height: 52 }}
           >
-            Guardar
+            {saving ? "Guardando…" : "Guardar"}
           </button>
         </div>
       </DrawerContent>

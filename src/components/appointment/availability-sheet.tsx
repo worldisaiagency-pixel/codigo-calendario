@@ -9,7 +9,7 @@ import {
   DrawerTitle,
 } from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";
-import type { BusinessProfile, ScheduleOverride } from "@/lib/data";
+import type { Business, ScheduleOverride } from "@/lib/data";
 import { findAvailableSlots, type AvailabilitySlot } from "@/lib/availability";
 import { ServicePicker } from "./service-picker";
 import {
@@ -41,7 +41,7 @@ export interface AvailabilityPick {
 export function AvailabilitySheet({
   open,
   onOpenChange,
-  profile,
+  business,
   scheduleOverrides,
   appointments,
   dogById,
@@ -50,14 +50,14 @@ export function AvailabilitySheet({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  profile: BusinessProfile;
+  business: Business;
   scheduleOverrides: ScheduleOverride[];
   appointments: Appointment[];
   dogById: Map<string, Dog>;
   ownerById: Map<string, Owner>;
   onConfirm: (pick: AvailabilityPick) => void;
 }) {
-  const services = profile.services;
+  const services = business.services;
   const serviceDurationMin = useMemo(
     () => Object.fromEntries(services.map((s) => [s.name, s.durationMin])),
     [services]
@@ -85,7 +85,7 @@ export function AvailabilitySheet({
     const rangeEnd =
       priority === "asap" ? addDays(today, 60) : priority === "week" ? endOfWeek(today) : endOfMonth(today);
     return findAvailableSlots({
-      profile,
+      business,
       scheduleOverrides,
       appointments,
       dogById,
@@ -95,7 +95,7 @@ export function AvailabilitySheet({
       rangeEnd,
       limit: 8,
     });
-  }, [profile, scheduleOverrides, service, priority, appointments, dogById, ownerById, serviceDurationMin]);
+  }, [business, scheduleOverrides, service, priority, appointments, dogById, ownerById, serviceDurationMin]);
 
   const canConfirm = Boolean(service && selected);
 

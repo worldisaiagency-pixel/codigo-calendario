@@ -1,5 +1,5 @@
 import type { Appointment, Dog, Owner } from "./types";
-import type { BusinessProfile, ScheduleOverride } from "./data";
+import type { Business, ScheduleOverride } from "./data";
 import { resolveDay } from "./data";
 import { buildRail } from "./rail";
 import { addDays, isSameDay, nowMinutes, toDateKey } from "./time";
@@ -16,7 +16,7 @@ export interface AvailabilitySlot {
 // per gap (not every 30-min increment inside it) keeps the ranked list
 // spread across distinct times/days instead of clustering in one gap.
 export function findAvailableSlots(params: {
-  profile: BusinessProfile;
+  business: Business;
   scheduleOverrides?: ScheduleOverride[];
   appointments: Appointment[];
   dogById: Map<string, Dog>;
@@ -27,7 +27,7 @@ export function findAvailableSlots(params: {
   limit?: number;
 }): AvailabilitySlot[] {
   const {
-    profile,
+    business,
     scheduleOverrides = [],
     appointments,
     dogById,
@@ -44,7 +44,7 @@ export function findAvailableSlots(params: {
   const end = new Date(rangeEnd.getFullYear(), rangeEnd.getMonth(), rangeEnd.getDate());
 
   while (cursor <= end && results.length < limit) {
-    const { schedule, blocks: manualBlocks } = resolveDay(profile, scheduleOverrides, cursor);
+    const { schedule, blocks: manualBlocks } = resolveDay(business, scheduleOverrides, cursor);
     if (!schedule) {
       cursor = addDays(cursor, 1);
       continue;

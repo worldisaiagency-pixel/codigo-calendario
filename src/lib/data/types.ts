@@ -23,21 +23,22 @@ export interface VacationRange {
   end: string; // YYYY-MM-DD
 }
 
-/** Sourced from the Sheet — just enough to log in. Everything operational
- * (services/hours/vacations) lives in BusinessProfile instead, configured
- * in-app per device (see profile-store.ts). */
-export interface Business {
-  id: string;
-  name: string;
-  username: string;
-}
-
-/** Configured by the business owner in-app (Ver perfil), stored locally per
- * business — never sourced from the Sheet. */
+/** The editable part of a business's config — services, hours, vacations.
+ * Sourced from (and written back to) the Sheet, keyed by NEGOCIO+USUARIO, so
+ * it's the same for that business on every device (see sheets-writer.ts). */
 export interface BusinessProfile {
   services: BusinessService[];
   hours: Record<Weekday, DaySchedule | null>;
   vacations: VacationRange[];
+}
+
+/** A logged-in business: identity from the Sheet plus its profile, also
+ * sourced from the Sheet. Editing the profile in-app writes back to the
+ * Sheet (see sheets-writer.ts) — never stored per-device. */
+export interface Business extends BusinessProfile {
+  id: string;
+  name: string;
+  username: string;
 }
 
 export function emptyHours(): Record<Weekday, DaySchedule | null> {

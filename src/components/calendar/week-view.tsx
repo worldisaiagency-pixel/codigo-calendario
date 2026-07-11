@@ -4,12 +4,12 @@ import { cn } from "@/lib/utils";
 import { buildRail } from "@/lib/rail";
 import { formatDayHeading, isSameDay, toDateKey, weekDays } from "@/lib/time";
 import { resolveDay } from "@/lib/data";
-import type { BusinessProfile, ScheduleOverride } from "@/lib/data";
+import type { Business, ScheduleOverride } from "@/lib/data";
 import type { Appointment, Dog, Owner } from "@/lib/types";
 
 export function WeekView({
   date,
-  profile,
+  business,
   scheduleOverrides,
   appointments,
   dogById,
@@ -17,7 +17,7 @@ export function WeekView({
   onSelectDay,
 }: {
   date: Date;
-  profile: BusinessProfile;
+  business: Business;
   scheduleOverrides: ScheduleOverride[];
   appointments: Appointment[];
   dogById: Map<string, Dog>;
@@ -33,7 +33,7 @@ export function WeekView({
         {days.map((d) => {
           const dateKey = toDateKey(d);
           const isToday = isSameDay(d, today);
-          const { schedule, blocks: manualBlocks } = resolveDay(profile, scheduleOverrides, d);
+          const { schedule, blocks: manualBlocks } = resolveDay(business, scheduleOverrides, d);
           const dayAppts = appointments.filter((a) => a.date === dateKey);
           const blocks = schedule
             ? buildRail({

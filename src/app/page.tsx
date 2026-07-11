@@ -37,7 +37,6 @@ import { toast } from "sonner";
 export default function Home() {
   const { status, login, logout } = useAuth();
   const business = useAppStore((s) => s.business);
-  const profile = useAppStore((s) => s.profile);
   const selectedDate = useAppStore((s) => s.selectedDate);
   const setSelectedDate = useAppStore((s) => s.setSelectedDate);
   const appointments = useAppStore((s) => s.appointments);
@@ -90,9 +89,9 @@ export default function Home() {
   // effect keeps this a single synchronous check per business, not a
   // separate cascading render.
   const [checkedProfileFor, setCheckedProfileFor] = useState<string | null>(null);
-  if (status === "authenticated" && business && profile && checkedProfileFor !== business.id) {
+  if (status === "authenticated" && business && checkedProfileFor !== business.id) {
     setCheckedProfileFor(business.id);
-    if (!isProfileConfigured(profile)) setProfileOpen(true);
+    if (!isProfileConfigured(business)) setProfileOpen(true);
   }
 
   async function handleToggleNotifications() {
@@ -128,8 +127,8 @@ export default function Home() {
   const dateKey = toDateKey(selectedDate);
   const isToday = isSameDay(selectedDate, new Date());
   const resolvedDay = useMemo(
-    () => (profile ? resolveDay(profile, scheduleOverrides, selectedDate) : null),
-    [profile, scheduleOverrides, selectedDate]
+    () => (business ? resolveDay(business, scheduleOverrides, selectedDate) : null),
+    [business, scheduleOverrides, selectedDate]
   );
   const schedule = resolvedDay?.schedule ?? null;
 
@@ -203,7 +202,7 @@ export default function Home() {
     );
   }
 
-  if (status === "unauthenticated" || !business || !profile) {
+  if (status === "unauthenticated" || !business) {
     return <LoginScreen onSuccess={login} />;
   }
 
@@ -245,7 +244,7 @@ export default function Home() {
         {viewMode === "week" && (
           <WeekView
             date={selectedDate}
-            profile={profile}
+            business={business}
             scheduleOverrides={scheduleOverrides}
             appointments={appointments}
             dogById={dogById}
@@ -266,14 +265,14 @@ export default function Home() {
 
       <NewAppointmentSheet
         slot={freeSlot}
-        services={profile.services}
+        services={business.services}
         onOpenChange={(open) => !open && setFreeSlot(null)}
       />
 
       <AvailabilitySheet
         open={availabilityOpen}
         onOpenChange={setAvailabilityOpen}
-        profile={profile}
+        business={business}
         scheduleOverrides={scheduleOverrides}
         appointments={appointments}
         dogById={dogById}

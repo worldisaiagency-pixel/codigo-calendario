@@ -1,5 +1,5 @@
 import type { Appointment, Dog, Owner } from "./types";
-import type { BusinessProfile, DaySchedule, ManualBlock, ScheduleOverride } from "./data";
+import type { Business, DaySchedule, ManualBlock, ScheduleOverride } from "./data";
 import { resolveDay } from "./data";
 import { findAvailableSlots } from "./availability";
 import { addDays, parseDateKey } from "./time";
@@ -50,14 +50,14 @@ function fitsSchedule(
  * order so two displaced appointments never get proposed the same new slot
  * (each accepted move is folded back in before searching for the next). */
 export function planScheduleChange(params: {
-  profile: BusinessProfile;
+  business: Business;
   existingOverrides: ScheduleOverride[];
   pendingOverrides: ScheduleOverride[];
   appointments: Appointment[];
   dogById: Map<string, Dog>;
   ownerById: Map<string, Owner>;
 }): ScheduleChangePlan {
-  const { profile, existingOverrides, pendingOverrides, appointments, dogById, ownerById } =
+  const { business, existingOverrides, pendingOverrides, appointments, dogById, ownerById } =
     params;
 
   const pendingDates = new Set(pendingOverrides.map((o) => o.date));
@@ -69,7 +69,7 @@ export function planScheduleChange(params: {
   const displaced = appointments
     .filter((a) => {
       if (!pendingDates.has(a.date) || a.status !== "confirmed") return false;
-      const { schedule, blocks } = resolveDay(profile, combinedOverrides, parseDateKey(a.date));
+      const { schedule, blocks } = resolveDay(business, combinedOverrides, parseDateKey(a.date));
       return !fitsSchedule(a, schedule, blocks);
     })
     .sort((a, b) => (a.date === b.date ? a.startMin - b.startMin : a.date < b.date ? -1 : 1));
@@ -85,7 +85,7 @@ export function planScheduleChange(params: {
 
     const fromDate = parseDateKey(appt.date);
     const results = findAvailableSlots({
-      profile,
+      business,
       scheduleOverrides: combinedOverrides,
       appointments: working,
       dogById,

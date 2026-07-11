@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Appointment, Dog, Owner } from "./types";
 import type { Business, BusinessProfile, ScheduleOverride } from "./data";
-import { loadProfile, saveProfile } from "./data";
+import { saveProfileToSheet } from "./data";
 import { toDateKey } from "./time";
 import { createLocalTable } from "./realtime/local-table";
 import type { RealtimeChangePayload, RealtimeTable } from "./realtime/types";
@@ -21,7 +21,6 @@ interface NewAppointmentInput {
 
 interface AppState {
   business: Business | null;
-  profile: BusinessProfile | null;
   appointments: Appointment[];
   dogs: Dog[];
   owners: Owner[];
@@ -38,7 +37,12 @@ interface AppState {
   updateAppointment: (id: string, patch: Partial<Appointment>) => void;
   addScheduleOverride: (override: Omit<ScheduleOverride, "id">) => ScheduleOverride;
   removeScheduleOverride: (id: string) => void;
-  updateProfile: (patch: Partial<BusinessProfile>) => void;
+  /** Patches services/hours/vacations, updates the UI immediately, and
+   * writes the change back to the Sheet (shared across every device for
+   * this negocio+usuario). Returns whether the Sheet write succeeded — the
+   * local/UI state stays updated either way, so the caller can offer a
+   * retry ("no se pudo guardar en la hoja") without losing the edit. */
+  updateProfile: (patch: Partial<BusinessProfile>) => Promise<boolean>;
 }
 
 let seq = 1000;
@@ -68,7 +72,6 @@ function reduceList<T extends { id: string }>(
 
 export const useAppStore = create<AppState>((set, get) => ({
   business: null,
-  profile: null,
   appointments: [],
   dogs: [],
   owners: [],
@@ -87,7 +90,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     set({
       business,
-      profile: loadProfile(business.id),
       appointments: appointmentsTable.list(),
       dogs: dogsTable.list(),
       owners: ownersTable.list(),
@@ -168,12 +170,16 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   removeScheduleOverride: (id) => scheduleOverridesTable?.remove(id),
 
-  updateProfile: (patch) => {
-    const { business, profile } = get();
-    if (!business || !profile) return;
-    const next = { ...profile, ...patch };
-    saveProfile(business.id, next);
-    set({ profile: next });
+  updateProfile: async (patch) => {
+    const { business } = get();
+    if (!business) return false;
+    const next: Business = { ...business, ...patch };
+    set({ business: next });
+    return saveProfileToSheet({
+      negocio: next.name,
+      usuario: next.username,
+      profile: next,
+    });
   },
 }));
 
