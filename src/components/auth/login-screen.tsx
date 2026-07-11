@@ -5,11 +5,14 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { dataProvider } from "@/lib/data";
 import type { Business } from "@/lib/data";
+import { isAdminCredentials } from "@/lib/auth/admin";
 
 export function LoginScreen({
   onSuccess,
+  onAdminSuccess,
 }: {
   onSuccess: (business: Business) => void;
+  onAdminSuccess: () => void;
 }) {
   const [negocio, setNegocio] = useState("");
   const [usuario, setUsuario] = useState("");
@@ -24,6 +27,10 @@ export function LoginScreen({
     setLoading(true);
     setError(null);
     try {
+      if (isAdminCredentials(negocio, usuario)) {
+        onAdminSuccess();
+        return;
+      }
       const businesses = await dataProvider.listBusinesses();
       const match = businesses.find(
         (b) =>

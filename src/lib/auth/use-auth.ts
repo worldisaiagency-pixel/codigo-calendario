@@ -6,7 +6,7 @@ import type { Business } from "@/lib/data";
 import { useAppStore } from "@/lib/store";
 import { clearSession, getSession, setSession } from "./session";
 
-type AuthStatus = "loading" | "authenticated" | "unauthenticated";
+type AuthStatus = "loading" | "authenticated" | "authenticated-admin" | "unauthenticated";
 
 /** Resumes a saved session on mount (re-fetching the business so config is
  * always current), and exposes login/logout for the login screen and the
@@ -22,6 +22,10 @@ export function useAuth() {
       const session = getSession();
       if (!session) {
         if (!cancelled) setStatus("unauthenticated");
+        return;
+      }
+      if (session.kind === "admin") {
+        if (!cancelled) setStatus("authenticated-admin");
         return;
       }
       try {
@@ -50,12 +54,18 @@ export function useAuth() {
 
   function login(business: Business) {
     setSession({
+      kind: "business",
       businessId: business.id,
       negocio: business.name,
       usuario: business.username,
     });
     loadBusiness(business);
     setStatus("authenticated");
+  }
+
+  function loginAdmin() {
+    setSession({ kind: "admin" });
+    setStatus("authenticated-admin");
   }
 
   function logout() {
@@ -66,5 +76,5 @@ export function useAuth() {
     if (typeof window !== "undefined") window.location.reload();
   }
 
-  return { status, login, logout };
+  return { status, login, loginAdmin, logout };
 }

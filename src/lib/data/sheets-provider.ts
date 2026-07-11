@@ -175,11 +175,13 @@ function toBusiness(block: Map<string, string[]>): Business | null {
 
   const hours = parseHours((block.get("HORARIOS") ?? []).join(", "));
   const vacations = (block.get("VACACIONES") ?? []).flatMap(parseVacationLine);
+  const websiteUrl = (block.get("WEB") ?? [])[0]?.trim() ?? "";
 
   return {
     id: slug(`${negocio}__${usuario}`),
     name: negocio,
     username: usuario,
+    websiteUrl,
     services,
     hours,
     vacations,

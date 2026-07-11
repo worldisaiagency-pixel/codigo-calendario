@@ -39,6 +39,7 @@ export interface Business extends BusinessProfile {
   id: string;
   name: string;
   username: string;
+  websiteUrl: string;
 }
 
 export function emptyHours(): Record<Weekday, DaySchedule | null> {

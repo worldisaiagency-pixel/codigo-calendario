@@ -30,8 +30,20 @@ const handler = async (req: Request) => {
   });
 
   const text = await upstream.text();
+  // Apps Script Web Apps always answer with HTTP 200 via ContentService, even
+  // when the handler itself reports failure in the JSON body — so upstream.ok
+  // alone can't tell success from failure. Parse the body and use its own
+  // `ok` field to decide the status we hand back to the client.
+  let succeeded = upstream.ok;
+  try {
+    const parsed = JSON.parse(text);
+    succeeded = upstream.ok && parsed.ok === true;
+  } catch {
+    succeeded = false;
+  }
+
   return new Response(text, {
-    status: upstream.ok ? 200 : 502,
+    status: succeeded ? 200 : 502,
     headers: { "Content-Type": "application/json" },
   });
 };

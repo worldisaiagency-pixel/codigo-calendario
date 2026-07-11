@@ -2,11 +2,18 @@
 
 const SESSION_KEY = "peluqueria:session";
 
-export interface Session {
+export interface BusinessSession {
+  kind?: "business"; // absent on sessions saved before the admin role existed
   businessId: string;
   negocio: string;
   usuario: string;
 }
+
+export interface AdminSession {
+  kind: "admin";
+}
+
+export type Session = BusinessSession | AdminSession;
 
 export function getSession(): Session | null {
   if (typeof window === "undefined") return null;

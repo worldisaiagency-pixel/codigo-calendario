@@ -14,6 +14,7 @@ import { DesktopSidePanel } from "@/components/appointment/desktop-side-panel";
 import type { ClientContext } from "@/components/appointment/client-detail-body";
 import { GlobalSearch } from "@/components/search/global-search";
 import { LoginScreen } from "@/components/auth/login-screen";
+import { AdminPanel } from "@/components/admin/admin-panel";
 import { BusinessMenuSheet } from "@/components/business/business-menu-sheet";
 import { ScheduleOverrideSheet } from "@/components/business/schedule-override-sheet";
 import { ProfileSheet } from "@/components/business/profile-sheet";
@@ -35,7 +36,7 @@ import type { RailBlock, Dog, ViewMode } from "@/lib/types";
 import { toast } from "sonner";
 
 export default function Home() {
-  const { status, login, logout } = useAuth();
+  const { status, login, loginAdmin, logout } = useAuth();
   const business = useAppStore((s) => s.business);
   const selectedDate = useAppStore((s) => s.selectedDate);
   const setSelectedDate = useAppStore((s) => s.setSelectedDate);
@@ -202,8 +203,12 @@ export default function Home() {
     );
   }
 
+  if (status === "authenticated-admin") {
+    return <AdminPanel onLogout={logout} />;
+  }
+
   if (status === "unauthenticated" || !business) {
-    return <LoginScreen onSuccess={login} />;
+    return <LoginScreen onSuccess={login} onAdminSuccess={loginAdmin} />;
   }
 
   return (
