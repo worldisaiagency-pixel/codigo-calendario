@@ -49,6 +49,10 @@ function doPost(e) {
     if (action === "createAppointment") return handleCreateAppointment(body);
     if (action === "updateAppointment") return handleUpdateAppointment(body);
     if (action === "deleteAppointment") return handleDeleteAppointment(body);
+    if (action === "reformatSeparators") {
+      applySeparatorBorders(sheet);
+      return jsonResponse({ ok: true });
+    }
     return jsonResponse({ ok: false, error: "unknown action" });
   } catch (err) {
     return jsonResponse({ ok: false, error: String(err) });
@@ -88,6 +92,7 @@ function handleSaveProfile(sheet, body) {
   });
 
   replaceBlock(sheet, block, rows);
+  applySeparatorBorders(sheet);
   return jsonResponse({ ok: true });
 }
 
@@ -122,6 +127,7 @@ function handleUpdateIdentity(sheet, body) {
   });
 
   replaceBlock(sheet, block, rows);
+  applySeparatorBorders(sheet);
   return jsonResponse({ ok: true });
 }
 
@@ -151,6 +157,7 @@ function handleCreateBusiness(sheet, body) {
 
   const lastRow = sheet.getLastRow();
   sheet.getRange(lastRow + 1, 1, rows.length, 2).setValues(rows);
+  applySeparatorBorders(sheet);
   return jsonResponse({ ok: true });
 }
 
@@ -169,6 +176,7 @@ function handleDeleteBusiness(sheet, body) {
   }
 
   sheet.deleteRows(block.startRow, block.numRows);
+  applySeparatorBorders(sheet);
   return jsonResponse({ ok: true });
 }
 
@@ -280,6 +288,32 @@ function handleDeleteAppointment(body) {
 }
 
 // --- Helpers -----------------------------------------------------------
+
+// Draws a yellow underline under the last row of every NEGOCIO/USUARIO
+// block, so it's visually obvious where one business's rows end and the
+// next begins. Recomputed from scratch after any structural change
+// (create/delete/rename a business, or a profile save that adds/removes
+// SERVICIOS/VACACIONES lines) since block lengths shift.
+const SEPARATOR_COLOR = "#FFD600";
+const SEPARATOR_COLS = 9; // A:I — matches the sheet's visible columns
+
+function applySeparatorBorders(sheet) {
+  const data = sheet.getDataRange().getValues();
+  const blockStartRows = [];
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][0] || "").trim().toUpperCase() === "NEGOCIO") {
+      blockStartRows.push(i + 1); // 1-indexed sheet row
+    }
+  }
+
+  for (let b = 0; b < blockStartRows.length; b++) {
+    const start = blockStartRows[b];
+    const end = b + 1 < blockStartRows.length ? blockStartRows[b + 1] - 1 : sheet.getLastRow();
+    sheet
+      .getRange(end, 1, 1, SEPARATOR_COLS)
+      .setBorder(null, null, true, null, null, null, SEPARATOR_COLOR, SpreadsheetApp.BorderStyle.SOLID_THICK);
+  }
+}
 
 function replaceBlock(sheet, block, rows) {
   sheet.deleteRows(block.startRow, block.numRows);
