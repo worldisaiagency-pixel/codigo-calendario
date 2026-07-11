@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { dataProvider } from "@/lib/data";
 import type { Business } from "@/lib/data";
-import { isAdminCredentials } from "@/lib/auth/admin";
+import { isAdminCredentials, isAdminNegocio } from "@/lib/auth/admin";
+import { checkAdminThrottle, recordAdminAttempt } from "@/lib/auth/admin-throttle";
 import { useThemeToggle } from "@/hooks/use-theme-toggle";
 import { WorldworkFooter } from "@/components/worldwork-footer";
 
@@ -31,9 +32,19 @@ export function LoginScreen({
     setLoading(true);
     setError(null);
     try {
-      if (isAdminCredentials(negocio, usuario)) {
-        onAdminSuccess();
-        return;
+      if (isAdminNegocio(negocio)) {
+        const throttle = checkAdminThrottle();
+        if (throttle.locked) {
+          const mins = Math.ceil(throttle.retryAfterSec / 60);
+          setError(`Demasiados intentos. Inténtalo de nuevo en ${mins} min.`);
+          return;
+        }
+        if (isAdminCredentials(negocio, usuario)) {
+          recordAdminAttempt(true);
+          onAdminSuccess();
+          return;
+        }
+        recordAdminAttempt(false);
       }
       const businesses = await dataProvider.listBusinesses();
       const match = businesses.find(

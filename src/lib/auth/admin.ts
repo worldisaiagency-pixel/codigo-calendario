@@ -9,3 +9,10 @@ const ADMIN_USUARIO = "2008";
 export function isAdminCredentials(negocio: string, usuario: string): boolean {
   return negocio.trim().toLowerCase() === ADMIN_NEGOCIO && usuario.trim() === ADMIN_USUARIO;
 }
+
+/** True as soon as the negocio field alone matches — used to decide whether
+ * a failed login should count toward the brute-force throttle, independent
+ * of whether the usuario guess was right. */
+export function isAdminNegocio(negocio: string): boolean {
+  return negocio.trim().toLowerCase() === ADMIN_NEGOCIO;
+}
