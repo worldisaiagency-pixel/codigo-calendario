@@ -48,6 +48,15 @@ export function buildRail(params: {
   ].sort((a, b) => a.startMin - b.startMin);
 
   const blocks: RailBlock[] = [];
+
+  // The rail always spans the full day (00:00-24:00) so a short shift (e.g.
+  // Saturday 10:00-14:00) still reads in context — only the schedule's own
+  // open/close window gets real free/busy/blocked slots; the rest of the
+  // day is a plain non-interactive "closed" filler.
+  if (schedule.open > 0) {
+    blocks.push({ kind: "closed", startMin: 0, durationMin: schedule.open });
+  }
+
   let cursor = schedule.open;
 
   for (const item of occupied) {
@@ -81,8 +90,16 @@ export function buildRail(params: {
   }
 
   const tailGap = schedule.close - cursor;
+  // A trailing sliver too short to book (< MIN_BOOKABLE_GAP) folds into the
+  // closed filler below instead of vanishing, so the timeline stays
+  // continuous right up to midnight.
+  const closedStart = tailGap >= MIN_BOOKABLE_GAP ? schedule.close : cursor;
   if (tailGap >= MIN_BOOKABLE_GAP) {
     blocks.push({ kind: "free", startMin: cursor, durationMin: tailGap });
+  }
+
+  if (closedStart < 1440) {
+    blocks.push({ kind: "closed", startMin: closedStart, durationMin: 1440 - closedStart });
   }
 
   return blocks;

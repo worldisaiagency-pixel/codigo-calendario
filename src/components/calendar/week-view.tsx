@@ -79,7 +79,9 @@ export function WeekView({
               <div className="min-w-0 flex-1">
                 <div className="flex h-2 w-full overflow-hidden rounded-full bg-slot-free-tint mb-1.5">
                   {schedule &&
-                    blocks.map((b, i) => (
+                    blocks
+                      .filter((b) => b.kind !== "closed")
+                      .map((b, i) => (
                       <div
                         key={i}
                         style={{ width: `${(b.durationMin / totalMin) * 100}%` }}

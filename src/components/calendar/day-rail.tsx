@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { AppointmentBlock } from "./appointment-block";
 import { FreeSlotBlock } from "./free-slot-block";
 import { BlockedSlotBlock } from "./blocked-slot-block";
+import { ClosedSlotBlock } from "./closed-slot-block";
 import { NowLine } from "./now-line";
 import { nowMinutes } from "@/lib/time";
 import { minuteOffsetInRail, railLayout } from "@/lib/scale";
@@ -30,7 +31,7 @@ export function DayRail({
   const hourMarks = useMemo(() => {
     const marks: { label: string; top: number }[] = [];
     if (!schedule) return marks;
-    for (let m = schedule.open; m <= schedule.close; m += 60) {
+    for (let m = 0; m < 1440; m += 60) {
       const top = minuteOffsetInRail(blocks, tops, m);
       if (top !== null) {
         marks.push({ label: String(Math.floor(m / 60)).padStart(2, "0"), top });
@@ -93,6 +94,9 @@ export function DayRail({
             }
             if (block.kind === "blocked") {
               return <BlockedSlotBlock key={`blocked-${i}-${block.startMin}`} block={block} />;
+            }
+            if (block.kind === "closed") {
+              return <ClosedSlotBlock key={`closed-${i}-${block.startMin}`} block={block} />;
             }
             return (
               <FreeSlotBlock

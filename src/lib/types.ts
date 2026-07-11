@@ -42,6 +42,7 @@ export interface HistoryEntry {
 export type RailBlock =
   | { kind: "busy"; appointment: Appointment; dog: Dog; owner: Owner; startMin: number; durationMin: number; isNext: boolean }
   | { kind: "free"; startMin: number; durationMin: number }
-  | { kind: "blocked"; startMin: number; durationMin: number; note?: string };
+  | { kind: "blocked"; startMin: number; durationMin: number; note?: string }
+  | { kind: "closed"; startMin: number; durationMin: number };
 
 export type ViewMode = "day" | "week" | "month";
