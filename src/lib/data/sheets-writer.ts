@@ -18,6 +18,35 @@ async function postToSheetBridge(body: Record<string, unknown>): Promise<boolean
   }
 }
 
+export interface SheetWriteResult {
+  ok: boolean;
+  /** Present on failure — e.g. "slot_taken" when the Apps Script's
+   * check-then-write (holding its lock) found a conflicting appointment. */
+  error?: string;
+}
+
+/** Same bridge, but surfaces the response body's `error` field instead of
+ * collapsing everything to a boolean — callers that need to distinguish
+ * "the slot was taken" from "the network/sheet failed" use this. */
+async function postToSheetBridgeDetailed(body: Record<string, unknown>): Promise<SheetWriteResult> {
+  try {
+    const res = await fetch("/.netlify/functions/save-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    let parsed: { ok?: boolean; error?: string } = {};
+    try {
+      parsed = await res.json();
+    } catch {
+      // Non-JSON body — treated as failure below.
+    }
+    return { ok: res.ok && parsed.ok === true, error: parsed.error };
+  } catch {
+    return { ok: false, error: "network_error" };
+  }
+}
+
 /** The business owner's own save — replaces services/hours/vacations,
  * leaves identity (negocio/usuario/web) untouched on the Sheet side. */
 export async function saveProfileToSheet(params: {
@@ -99,8 +128,8 @@ export async function createAppointmentInSheet(params: {
   breed: string;
   status: string;
   origin: "app" | "web";
-}): Promise<boolean> {
-  return postToSheetBridge({
+}): Promise<SheetWriteResult> {
+  return postToSheetBridgeDetailed({
     action: "createAppointment",
     id: params.id,
     negocio: params.negocio,

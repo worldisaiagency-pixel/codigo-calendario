@@ -17,6 +17,7 @@ export {
 } from "./sheets-writer";
 export { fetchReservas } from "./reservas-sync";
 export type { PendingReserva } from "./reservas-sync";
+export type { SheetWriteResult } from "./sheets-writer";
 export { emptyProfile, emptyHours, isProfileConfigured, WEEKDAYS } from "./types";
 
 export type {

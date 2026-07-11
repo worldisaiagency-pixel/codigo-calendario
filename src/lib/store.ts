@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Appointment, Dog, Owner } from "./types";
-import type { Business, BusinessProfile, PendingReserva, ScheduleOverride } from "./data";
+import type { Business, BusinessProfile, PendingReserva, ScheduleOverride, SheetWriteResult } from "./data";
 import {
   saveProfileToSheet,
   fetchReservas,
@@ -44,7 +44,16 @@ interface AppState {
    * for the realtime listeners. */
   loadBusiness: (business: Business) => () => void;
   setSelectedDate: (d: Date) => void;
-  addAppointment: (input: NewAppointmentInput) => Appointment;
+  /** Inserts locally right away for a snappy UI, then awaits the Sheet
+   * write — which is the actual single source of truth, checked and
+   * written atomically on the Apps Script side (see handleCreateAppointment
+   * in scripts/sheet-write-apps-script.js). If that write is rejected
+   * (most importantly "slot_taken" — someone else, app or web, just booked
+   * the same range), the local insert is rolled back so the calendar never
+   * shows a confirmed appointment the Sheet doesn't actually have. */
+  addAppointment: (
+    input: NewAppointmentInput
+  ) => Promise<{ ok: true; appointment: Appointment } | { ok: false; error: string }>;
   removeAppointment: (id: string) => void;
   updateAppointment: (id: string, patch: Partial<Appointment>) => void;
   /** Idempotently imports one row pulled from the shared "Reservas" sheet
@@ -149,19 +158,23 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setSelectedDate: (d) => set({ selectedDate: d }),
 
-  addAppointment: (input) => {
+  addAppointment: async (input) => {
     if (!ownersTable || !dogsTable || !appointmentsTable) {
       throw new Error("addAppointment called before a business was loaded");
     }
     let ownerId = input.existingOwnerId;
     let dogId = input.existingDogId;
+    let insertedOwnerId: string | null = null;
+    let insertedDogId: string | null = null;
 
     if (!ownerId) {
       ownerId = `o-new-${seq++}`;
+      insertedOwnerId = ownerId;
       ownersTable.insert({ id: ownerId, name: input.ownerName, phone: input.phone ?? "" });
     }
     if (!dogId) {
       dogId = `d-new-${seq++}`;
+      insertedDogId = dogId;
       dogsTable.insert({
         id: dogId,
         name: input.dogName,
@@ -187,12 +200,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     appointmentsTable.insert(newAppt);
 
     const { business } = get();
-    if (business) {
-      // Fire-and-forget, same as updateProfile's write-back: the local
-      // insert above is already the source of truth for this device: a
-      // failed sync just means other devices/the website won't see it until
-      // the next successful poll, not that the booking itself is lost.
-      createAppointmentInSheet({
+    if (!business) {
+      return { ok: true, appointment: newAppt };
+    }
+
+    let result: SheetWriteResult;
+    try {
+      result = await createAppointmentInSheet({
         id: newAppt.id,
         negocio: business.name,
         usuario: business.username,
@@ -207,9 +221,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         status: newAppt.status,
         origin: "app",
       });
+    } catch {
+      result = { ok: false, error: "network_error" };
     }
 
-    return newAppt;
+    if (!result.ok) {
+      // The Sheet is the single source of truth — if it rejected the
+      // write (most importantly a slot someone else just took), this
+      // device's local copy must not disagree with it.
+      appointmentsTable.remove(newAppt.id);
+      if (insertedDogId) dogsTable.remove(insertedDogId);
+      if (insertedOwnerId) ownersTable.remove(insertedOwnerId);
+      return { ok: false, error: result.error ?? "write_failed" };
+    }
+
+    return { ok: true, appointment: newAppt };
   },
 
   removeAppointment: (id) => {

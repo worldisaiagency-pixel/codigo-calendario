@@ -137,7 +137,7 @@ function BookingForm({
   async function handleSubmit() {
     if (!canSubmit || !selected) return;
     setSubmitState("submitting");
-    const ok = await createAppointmentInSheet({
+    const result = await createAppointmentInSheet({
       id: crypto.randomUUID(),
       negocio: business.name,
       usuario: business.username,
@@ -152,7 +152,7 @@ function BookingForm({
       status: "confirmed",
       origin: "web",
     });
-    setSubmitState(ok ? "done" : "error");
+    setSubmitState(result.ok ? "done" : "error");
   }
 
   if (submitState === "done") {

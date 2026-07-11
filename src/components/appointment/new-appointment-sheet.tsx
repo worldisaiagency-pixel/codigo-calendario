@@ -177,11 +177,13 @@ export function NewAppointmentSheet({
   const ownerReady = ownerName.trim().length > 0;
   const dogReady = dogName.trim().length > 0;
   const canSave = Boolean(slot) && ownerReady && dogReady && service.length > 0;
+  const [saving, setSaving] = useState(false);
 
-  function handleSave() {
-    if (!slot || !canSave) return;
+  async function handleSave() {
+    if (!slot || !canSave || saving) return;
     dismissKeyboard();
-    addAppointment({
+    setSaving(true);
+    const result = await addAppointment({
       ownerName: ownerName.trim(),
       dogName: dogName.trim(),
       breed: breed.trim() || undefined,
@@ -193,6 +195,17 @@ export function NewAppointmentSheet({
       existingDogId: matchedDog?.id,
       existingOwnerId: matchedDog?.ownerId,
     });
+    setSaving(false);
+
+    if (!result.ok) {
+      toast.error(
+        result.error === "slot_taken"
+          ? "Ese hueco se acaba de ocupar. Elige otra hora."
+          : "No se pudo guardar la cita. Inténtalo de nuevo.",
+      );
+      return;
+    }
+
     toast.success(`Cita guardada · ${dogName.trim()}`, {
       description: `${minToLabel(actualStartMin)} · ${durationLabel(clampedDuration)}`,
     });
@@ -354,17 +367,18 @@ export function NewAppointmentSheet({
         <div className="shrink-0 px-4 pt-3 border-t border-border/60 bg-popover" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
           <button
             type="button"
-            disabled={!canSave}
+            disabled={!canSave || saving}
             onClick={handleSave}
             className={cn(
               "w-full h-13 rounded-2xl text-[16px] font-semibold transition-all duration-150 active:scale-[0.985]",
               canSave
                 ? "bg-primary text-primary-foreground"
-                : "bg-secondary text-muted-foreground"
+                : "bg-secondary text-muted-foreground",
+              saving && "opacity-60"
             )}
             style={{ height: 52 }}
           >
-            Guardar cita
+            {saving ? "Guardando…" : "Guardar cita"}
           </button>
         </div>
       </DrawerContent>
