@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Check, Copy } from "lucide-react";
 import {
   Drawer,
   DrawerContent,
@@ -11,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { updateBusinessIdentity, deleteBusinessFromSheet } from "@/lib/data";
 import type { Business } from "@/lib/data";
+import { bookingUrl, bookingEmbedSnippet } from "@/lib/booking-link";
 import { toast } from "sonner";
 
 export function BusinessEditSheet({
@@ -31,6 +33,8 @@ export function BusinessEditSheet({
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [saving, setSaving] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedSnippet, setCopiedSnippet] = useState(false);
 
   // Reset every time a (different) business is opened for editing —
   // adjusting state during render keeps this synchronous. Both sides must
@@ -70,6 +74,28 @@ export function BusinessEditSheet({
       toast.error("No se pudo guardar en la hoja", {
         description: "Revisa tu conexión e inténtalo de nuevo",
       });
+    }
+  }
+
+  async function copyLink() {
+    if (!business) return;
+    try {
+      await navigator.clipboard.writeText(bookingUrl(business));
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 1500);
+    } catch {
+      // Clipboard permission denied/unavailable.
+    }
+  }
+
+  async function copySnippet() {
+    if (!business) return;
+    try {
+      await navigator.clipboard.writeText(bookingEmbedSnippet(business));
+      setCopiedSnippet(true);
+      setTimeout(() => setCopiedSnippet(false), 1500);
+    } catch {
+      // Clipboard permission denied/unavailable.
     }
   }
 
@@ -132,6 +158,50 @@ export function BusinessEditSheet({
               inputMode="url"
             />
           </div>
+
+          {business && (
+            <div>
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2 px-1">
+                Reserva online
+              </div>
+              <div className="rounded-2xl bg-secondary overflow-hidden divide-y divide-border/60">
+                <button
+                  type="button"
+                  onClick={copyLink}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-accent transition-colors"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium">Enlace de reserva</div>
+                    <div className="text-[12px] text-muted-foreground truncate">
+                      {bookingUrl(business)}
+                    </div>
+                  </div>
+                  {copiedLink ? (
+                    <Check className="size-4 shrink-0 text-slot-free" strokeWidth={2.25} />
+                  ) : (
+                    <Copy className="size-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={copySnippet}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-accent transition-colors"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-medium">Código para su web</div>
+                    <div className="text-[12px] text-muted-foreground truncate">
+                      Pégalo una vez en su sitio y aparece un botón conectado
+                    </div>
+                  </div>
+                  {copiedSnippet ? (
+                    <Check className="size-4 shrink-0 text-slot-free" strokeWidth={2.25} />
+                  ) : (
+                    <Copy className="size-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
 
           <button
             type="button"
