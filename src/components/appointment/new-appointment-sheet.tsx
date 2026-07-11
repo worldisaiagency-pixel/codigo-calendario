@@ -209,10 +209,7 @@ export function NewAppointmentSheet({
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent
-        className={cn(
-          "flex flex-col sm:max-w-md sm:mx-auto overflow-hidden",
-          "data-[vaul-drawer-direction=bottom]:mt-0 data-[vaul-drawer-direction=bottom]:h-[100dvh] data-[vaul-drawer-direction=bottom]:max-h-[100dvh] data-[vaul-drawer-direction=bottom]:rounded-t-[20px]"
-        )}
+        className="flex flex-col sm:max-w-md sm:mx-auto overflow-hidden"
       >
         <DrawerHeader className="safe-top text-left pb-3 shrink-0">
           <DrawerTitle className="sr-only">Nueva cita</DrawerTitle>
