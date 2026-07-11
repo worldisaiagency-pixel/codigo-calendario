@@ -8,6 +8,7 @@
 // meant to be called from arbitrary business-owned domains.
 import { sheetsProvider } from "../../src/lib/data/sheets-provider";
 import { fetchReservas } from "../../src/lib/data/reservas-sync";
+import { fetchOverrides } from "../../src/lib/data/overrides-sync";
 import { findAvailableSlots } from "../../src/lib/availability";
 import { addDays } from "../../src/lib/time";
 import type { Appointment, Dog, Owner } from "../../src/lib/types";
@@ -69,7 +70,10 @@ const handler = async (req: Request) => {
     return json({ ok: true, services: [], slots: [] });
   }
 
-  const reservas = await fetchReservas(business.name, business.username);
+  const [reservas, scheduleOverrides] = await Promise.all([
+    fetchReservas(business.name, business.username),
+    fetchOverrides(business.name, business.username),
+  ]);
   const appointments: Appointment[] = reservas.map((r) => ({
     id: r.id,
     dogId: r.id,
@@ -89,6 +93,7 @@ const handler = async (req: Request) => {
   const today = new Date();
   const slots = findAvailableSlots({
     business,
+    scheduleOverrides,
     appointments,
     dogById: emptyDogById,
     ownerById: emptyOwnerById,
@@ -96,6 +101,7 @@ const handler = async (req: Request) => {
     rangeStart: today,
     rangeEnd: addDays(today, days),
     limit: 200,
+    allSlotsPerGap: true,
   });
 
   return json({

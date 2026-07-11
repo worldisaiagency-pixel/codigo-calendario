@@ -4,9 +4,12 @@ import type { Business, BusinessProfile, PendingReserva, ScheduleOverride, Sheet
 import {
   saveProfileToSheet,
   fetchReservas,
+  fetchOverrides,
   createAppointmentInSheet,
   updateAppointmentInSheet,
   deleteAppointmentFromSheet,
+  createOverrideInSheet,
+  deleteOverrideFromSheet,
 } from "./data";
 import { toDateKey } from "./time";
 import { createLocalTable } from "./realtime/local-table";
@@ -55,11 +58,28 @@ interface AppState {
     input: NewAppointmentInput
   ) => Promise<{ ok: true; appointment: Appointment } | { ok: false; error: string }>;
   removeAppointment: (id: string) => void;
-  updateAppointment: (id: string, patch: Partial<Appointment>) => void;
+  /** Same await-then-rollback shape as addAppointment: applies the patch
+   * locally right away, then awaits the Sheet write (which re-checks for
+   * overlaps against every OTHER appointment when date/time actually
+   * change — see handleUpdateAppointment in scripts/sheet-write-apps-
+   * script.js). On rejection, the local change is reverted to whatever it
+   * was before, instead of leaving the calendar showing a move the Sheet
+   * refused. */
+  updateAppointment: (
+    id: string,
+    patch: Partial<Appointment>
+  ) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** Idempotently imports one row pulled from the shared "Reservas" sheet
    * (a booking made on the website, or by this business on another device)
    * into the local tables — a no-op if that id is already present. */
   mergeRemoteAppointment: (row: PendingReserva) => void;
+  /** Same idempotent-import shape as mergeRemoteAppointment, for the shared
+   * "Overrides" sheet — a closure/hour change made on another device. */
+  mergeRemoteOverride: (override: ScheduleOverride) => void;
+  /** Writes through to the shared "Overrides" sheet (fire-and-forget — a
+   * closure syncing a little late is a much lower-stakes gap than an
+   * appointment double-booking, so this doesn't need the same
+   * await-then-rollback treatment as addAppointment). */
   addScheduleOverride: (override: Omit<ScheduleOverride, "id">) => ScheduleOverride;
   removeScheduleOverride: (id: string) => void;
   /** Patches services/hours/vacations, updates the UI immediately, and
@@ -138,10 +158,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
     // Pull in anything booked elsewhere (the public website, or this same
     // business on another device) — once on load, then on a timer for as
-    // long as this business stays logged in here.
+    // long as this business stays logged in here. Same cadence for
+    // schedule overrides, so a closure set from another device (or one a
+    // public site would need to respect) shows up here too.
     const pullReservas = () => {
       fetchReservas(business.name, business.username).then((rows) => {
         for (const row of rows) get().mergeRemoteAppointment(row);
+      });
+      fetchOverrides(business.name, business.username).then((rows) => {
+        for (const row of rows) get().mergeRemoteOverride(row);
       });
     };
     pullReservas();
@@ -243,16 +268,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     deleteAppointmentFromSheet({ id });
   },
 
-  updateAppointment: (id, patch) => {
+  updateAppointment: async (id, patch) => {
+    const before = get().appointments.find((a) => a.id === id);
     appointmentsTable?.update(id, patch);
-    updateAppointmentInSheet({
-      id,
-      date: patch.date,
-      startMin: patch.startMin,
-      durationMin: patch.durationMin,
-      service: patch.service,
-      status: patch.status,
-    });
+
+    let result: SheetWriteResult;
+    try {
+      result = await updateAppointmentInSheet({
+        id,
+        date: patch.date,
+        startMin: patch.startMin,
+        durationMin: patch.durationMin,
+        service: patch.service,
+        status: patch.status,
+      });
+    } catch {
+      result = { ok: false, error: "network_error" };
+    }
+
+    if (!result.ok) {
+      if (before) appointmentsTable?.update(id, before);
+      return { ok: false, error: result.error ?? "write_failed" };
+    }
+    return { ok: true };
   },
 
   mergeRemoteAppointment: (row) => {
@@ -292,16 +330,44 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
 
+  mergeRemoteOverride: (override) => {
+    if (!scheduleOverridesTable) return;
+    if (get().scheduleOverrides.some((o) => o.id === override.id)) return;
+    scheduleOverridesTable.insert(override);
+  },
+
   addScheduleOverride: (override) => {
     if (!scheduleOverridesTable) {
       throw new Error("addScheduleOverride called before a business was loaded");
     }
-    const row: ScheduleOverride = { id: `so-${seq++}`, ...override };
+    // A real id (not the old per-page-load `so-${seq}` counter): this is
+    // now the shared Sheet row's key too, so it must not collide with one
+    // generated on a different device.
+    const row: ScheduleOverride = { id: crypto.randomUUID(), ...override };
     scheduleOverridesTable.insert(row);
+
+    const { business } = get();
+    if (business) {
+      createOverrideInSheet({
+        id: row.id,
+        negocio: business.name,
+        usuario: business.username,
+        date: row.date,
+        kind: row.kind,
+        openMin: row.open,
+        closeMin: row.close,
+        blockStart: row.blockStart,
+        blockEnd: row.blockEnd,
+        note: row.note,
+      });
+    }
     return row;
   },
 
-  removeScheduleOverride: (id) => scheduleOverridesTable?.remove(id),
+  removeScheduleOverride: (id) => {
+    scheduleOverridesTable?.remove(id);
+    deleteOverrideFromSheet({ id });
+  },
 
   updateProfile: async (patch) => {
     const { business } = get();

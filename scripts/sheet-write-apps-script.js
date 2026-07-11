@@ -49,6 +49,8 @@ function doPost(e) {
     if (action === "createAppointment") return handleCreateAppointment(body);
     if (action === "updateAppointment") return handleUpdateAppointment(body);
     if (action === "deleteAppointment") return handleDeleteAppointment(body);
+    if (action === "createOverride") return handleCreateOverride(body);
+    if (action === "deleteOverride") return handleDeleteOverride(body);
     if (action === "reformatSeparators") {
       applySeparatorBorders(sheet);
       return jsonResponse({ ok: true });
@@ -224,12 +226,15 @@ function rangesOverlap(aStart, aEnd, bStart, bEnd) {
 // Re-reads the sheet fresh (called while holding the script lock, so this
 // reflects any write that just committed from a concurrent request) and
 // looks for any existing appointment for the same negocio+usuario+fecha
-// whose time range overlaps the requested one.
-function findConflictingAppointment(sheet, negocio, usuario, fecha, inicioMin, duracionMin) {
+// whose time range overlaps the requested one. `excludeId` lets a
+// reschedule check against every OTHER appointment without flagging
+// itself as a conflict.
+function findConflictingAppointment(sheet, negocio, usuario, fecha, inicioMin, duracionMin, excludeId) {
   const data = sheet.getDataRange().getValues();
   const requestedEnd = inicioMin + duracionMin;
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
+    if (excludeId && String(row[0]).trim() === excludeId) continue;
     if (String(row[1]).trim() !== negocio) continue;
     if (String(row[2]).trim() !== usuario) continue;
     if (String(row[3]).trim() !== fecha) continue;
@@ -305,43 +310,151 @@ function handleCreateAppointment(body) {
 
 // Used when the business reschedules an appointment from the app (e.g. the
 // auto-rebooking flow). Only touches the fields the caller actually sends.
+//
+// Holds the same script-wide lock as handleCreateAppointment, and re-checks
+// for overlaps if the move would actually change date/time — otherwise a
+// reschedule could silently land on top of another appointment with no
+// check at all (the previous version had none).
 function handleUpdateAppointment(body) {
   const id = String(body.id || "").trim();
   if (!id) return jsonResponse({ ok: false, error: "missing id" });
 
-  const sheet = getOrCreateReservasSheet();
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim() !== id) continue;
-    const row = i + 1;
-    if (body.fecha != null) {
-      const cell = sheet.getRange(row, 4);
-      cell.setNumberFormat("@").setValue(String(body.fecha));
-    }
-    if (body.inicioMin != null) {
-      const cell = sheet.getRange(row, 5);
-      cell.setNumberFormat("@").setValue(String(Number(body.inicioMin)));
-    }
-    if (body.duracionMin != null) {
-      const cell = sheet.getRange(row, 6);
-      cell.setNumberFormat("@").setValue(String(Number(body.duracionMin)));
-    }
-    if (body.servicio != null) {
-      sheet.getRange(row, 7).setValue(String(body.servicio));
-    }
-    if (body.estado != null) {
-      sheet.getRange(row, 12).setValue(String(body.estado));
-    }
-    return jsonResponse({ ok: true });
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (err) {
+    return jsonResponse({ ok: false, error: "busy, try again" });
   }
-  return jsonResponse({ ok: false, error: "appointment not found" });
+
+  try {
+    const sheet = getOrCreateReservasSheet();
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() !== id) continue;
+      const row = i + 1;
+      const negocio = String(data[i][1]).trim();
+      const usuario = String(data[i][2]).trim();
+
+      const nextFecha = body.fecha != null ? String(body.fecha) : String(data[i][3]).trim();
+      const nextInicio = body.inicioMin != null ? Number(body.inicioMin) : Number(data[i][4]) || 0;
+      const nextDuracion = body.duracionMin != null ? Number(body.duracionMin) : Number(data[i][5]) || 0;
+
+      const movingTime = body.fecha != null || body.inicioMin != null || body.duracionMin != null;
+      if (movingTime) {
+        const conflict = findConflictingAppointment(sheet, negocio, usuario, nextFecha, nextInicio, nextDuracion, id);
+        if (conflict) {
+          return jsonResponse({ ok: false, error: "slot_taken" });
+        }
+      }
+
+      if (body.fecha != null) {
+        sheet.getRange(row, 4).setNumberFormat("@").setValue(nextFecha);
+      }
+      if (body.inicioMin != null) {
+        sheet.getRange(row, 5).setNumberFormat("@").setValue(String(nextInicio));
+      }
+      if (body.duracionMin != null) {
+        sheet.getRange(row, 6).setNumberFormat("@").setValue(String(nextDuracion));
+      }
+      if (body.servicio != null) {
+        sheet.getRange(row, 7).setValue(String(body.servicio));
+      }
+      if (body.estado != null) {
+        sheet.getRange(row, 12).setValue(String(body.estado));
+      }
+      return jsonResponse({ ok: true });
+    }
+    return jsonResponse({ ok: false, error: "appointment not found" });
+  } finally {
+    lock.releaseLock();
+  }
 }
 
+// Holds the lock too — mostly so a delete can never interleave with a
+// concurrent create/update reading a half-modified sheet mid-shift.
 function handleDeleteAppointment(body) {
   const id = String(body.id || "").trim();
   if (!id) return jsonResponse({ ok: false, error: "missing id" });
 
-  const sheet = getOrCreateReservasSheet();
+  const lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(10000);
+  } catch (err) {
+    return jsonResponse({ ok: false, error: "busy, try again" });
+  }
+
+  try {
+    const sheet = getOrCreateReservasSheet();
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === id) {
+        sheet.deleteRow(i + 1);
+        return jsonResponse({ ok: true });
+      }
+    }
+    return jsonResponse({ ok: false, error: "appointment not found" });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// --- Schedule overrides (spontaneous closures/hour changes/blocks) --------
+//
+// Own tab, same reasoning as Reservas: previously these only lived in each
+// business's localStorage, so neither the public booking page nor any
+// external site ever knew about a same-day closure/urgency. Now they're
+// written here too, and read the same public-CSV way as everything else.
+
+const OVERRIDES_SHEET_NAME = "Overrides";
+const OVERRIDES_HEADERS = [
+  "ID", "NEGOCIO", "USUARIO", "FECHA", "KIND",
+  "OPEN_MIN", "CLOSE_MIN", "BLOCK_START", "BLOCK_END", "NOTE",
+];
+
+function getOrCreateOverridesSheet() {
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(OVERRIDES_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(OVERRIDES_SHEET_NAME);
+    sheet.appendRow(OVERRIDES_HEADERS);
+  }
+  return sheet;
+}
+
+function handleCreateOverride(body) {
+  const id = String(body.id || Utilities.getUuid()).trim();
+  const negocio = String(body.negocio || "").trim();
+  const usuario = String(body.usuario || "").trim();
+  const fecha = String(body.fecha || "").trim();
+  const kind = String(body.kind || "").trim();
+  if (!id || !negocio || !usuario || !fecha || !kind) {
+    return jsonResponse({ ok: false, error: "missing fields" });
+  }
+
+  const sheet = getOrCreateOverridesSheet();
+  const row = sheet.getLastRow() + 1;
+  const range = sheet.getRange(row, 1, 1, OVERRIDES_HEADERS.length);
+  range.setNumberFormat("@");
+  range.setValues([[
+    id,
+    negocio,
+    usuario,
+    fecha,
+    kind,
+    body.openMin != null ? String(Number(body.openMin)) : "",
+    body.closeMin != null ? String(Number(body.closeMin)) : "",
+    body.blockStart != null ? String(Number(body.blockStart)) : "",
+    body.blockEnd != null ? String(Number(body.blockEnd)) : "",
+    String(body.note || ""),
+  ]]);
+  return jsonResponse({ ok: true, id: id });
+}
+
+function handleDeleteOverride(body) {
+  const id = String(body.id || "").trim();
+  if (!id) return jsonResponse({ ok: false, error: "missing id" });
+
+  const sheet = getOrCreateOverridesSheet();
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === id) {
@@ -349,7 +462,7 @@ function handleDeleteAppointment(body) {
       return jsonResponse({ ok: true });
     }
   }
-  return jsonResponse({ ok: false, error: "appointment not found" });
+  return jsonResponse({ ok: false, error: "override not found" });
 }
 
 // --- Helpers -----------------------------------------------------------

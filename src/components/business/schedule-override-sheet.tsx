@@ -14,6 +14,7 @@ import { addDays, formatDayHeading, toDateKey } from "@/lib/time";
 import type { ScheduleOverride, ScheduleOverrideKind } from "@/lib/data";
 import { ScheduleChangeSummary } from "./schedule-change-summary";
 import { NotifyClientsSheet } from "./notify-clients-sheet";
+import { toast } from "sonner";
 
 type UiChoice = "closed" | "block" | "extend" | "modify";
 type Step = "edit" | "summary" | "notify";
@@ -131,7 +132,7 @@ export function ScheduleOverrideSheet({
     setStep("summary");
   }
 
-  function handleConfirm() {
+  async function handleConfirm() {
     if (!plan) return;
     for (const o of pendingOverrides) {
       addScheduleOverride({
@@ -143,12 +144,23 @@ export function ScheduleOverrideSheet({
         blockEnd: o.blockEnd,
       });
     }
+
+    let failedCount = 0;
     for (const move of plan.moves) {
-      updateAppointment(move.appointment.id, {
+      const result = await updateAppointment(move.appointment.id, {
         date: move.toDate,
         startMin: move.toStartMin,
       });
+      if (!result.ok) failedCount++;
     }
+    if (failedCount > 0) {
+      toast.error(
+        failedCount === 1
+          ? "Una cita no se pudo reprogramar (el hueco ya no estaba libre) — revísala en el calendario."
+          : `${failedCount} citas no se pudieron reprogramar (los huecos ya no estaban libres) — revísalas en el calendario.`
+      );
+    }
+
     if (plan.moves.length > 0) {
       setStep("notify");
     } else {

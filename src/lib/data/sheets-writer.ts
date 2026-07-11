@@ -156,8 +156,8 @@ export async function updateAppointmentInSheet(params: {
   durationMin?: number;
   service?: string;
   status?: string;
-}): Promise<boolean> {
-  return postToSheetBridge({
+}): Promise<SheetWriteResult> {
+  return postToSheetBridgeDetailed({
     action: "updateAppointment",
     id: params.id,
     fecha: params.date,
@@ -170,4 +170,38 @@ export async function updateAppointmentInSheet(params: {
 
 export async function deleteAppointmentFromSheet(params: { id: string }): Promise<boolean> {
   return postToSheetBridge({ action: "deleteAppointment", id: params.id });
+}
+
+/** Writes a spontaneous schedule override (closure/hour change/block) to
+ * the shared "Overrides" tab, so the public booking page and any external
+ * site see it too — previously these only ever lived in localStorage. */
+export async function createOverrideInSheet(params: {
+  id: string;
+  negocio: string;
+  usuario: string;
+  date: string;
+  kind: string;
+  openMin?: number;
+  closeMin?: number;
+  blockStart?: number;
+  blockEnd?: number;
+  note?: string;
+}): Promise<boolean> {
+  return postToSheetBridge({
+    action: "createOverride",
+    id: params.id,
+    negocio: params.negocio,
+    usuario: params.usuario,
+    fecha: params.date,
+    kind: params.kind,
+    openMin: params.openMin,
+    closeMin: params.closeMin,
+    blockStart: params.blockStart,
+    blockEnd: params.blockEnd,
+    note: params.note,
+  });
+}
+
+export async function deleteOverrideFromSheet(params: { id: string }): Promise<boolean> {
+  return postToSheetBridge({ action: "deleteOverride", id: params.id });
 }

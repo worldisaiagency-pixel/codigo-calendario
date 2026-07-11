@@ -6,8 +6,8 @@ import { Check, PawPrint } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { ServicePicker } from "@/components/appointment/service-picker";
 import { cn } from "@/lib/utils";
-import { dataProvider, fetchReservas, createAppointmentInSheet } from "@/lib/data";
-import type { Business } from "@/lib/data";
+import { dataProvider, fetchReservas, fetchOverrides, createAppointmentInSheet } from "@/lib/data";
+import type { Business, ScheduleOverride } from "@/lib/data";
 import { findAvailableSlots, type AvailabilitySlot } from "@/lib/availability";
 import { addDays, durationLabel, formatDayHeading, minToLabel, parseDateKey } from "@/lib/time";
 import type { Appointment, Dog, Owner } from "@/lib/types";
@@ -24,6 +24,7 @@ export function ReservarClient() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [business, setBusiness] = useState<Business | null>(null);
   const [bookedAppointments, setBookedAppointments] = useState<Appointment[]>([]);
+  const [scheduleOverrides, setScheduleOverrides] = useState<ScheduleOverride[]>([]);
 
   useEffect(() => {
     if (invalidLink) return; // rendered directly below, no fetch needed
@@ -41,20 +42,13 @@ export function ReservarClient() {
           setLoadState("not-found");
           return;
         }
-        const reservas = await fetchReservas(match.name, match.username);
+        const [reservas, overrides] = await Promise.all([
+          fetchReservas(match.name, match.username),
+          fetchOverrides(match.name, match.username),
+        ]);
         if (cancelled) return;
-        setBookedAppointments(
-          reservas.map((r) => ({
-            id: r.id,
-            dogId: r.id,
-            ownerId: r.id,
-            date: r.date,
-            startMin: r.startMin,
-            durationMin: r.durationMin,
-            service: r.service,
-            status: r.status,
-          }))
-        );
+        setBookedAppointments(toAppointments(reservas));
+        setScheduleOverrides(overrides);
         setBusiness(match);
         setLoadState("ready");
       } catch {
@@ -80,7 +74,13 @@ export function ReservarClient() {
     );
   }
 
-  return <BookingForm business={business} bookedAppointments={bookedAppointments} />;
+  return (
+    <BookingForm
+      business={business}
+      bookedAppointments={bookedAppointments}
+      scheduleOverrides={scheduleOverrides}
+    />
+  );
 }
 
 function CenteredMessage({ children }: { children: React.ReactNode }) {
@@ -94,12 +94,31 @@ function CenteredMessage({ children }: { children: React.ReactNode }) {
 const emptyDogById = new Map<string, Dog>();
 const emptyOwnerById = new Map<string, Owner>();
 
+function toAppointments(rows: Awaited<ReturnType<typeof fetchReservas>>): Appointment[] {
+  return rows.map((r) => ({
+    id: r.id,
+    dogId: r.id,
+    ownerId: r.id,
+    date: r.date,
+    startMin: r.startMin,
+    durationMin: r.durationMin,
+    service: r.service,
+    status: r.status,
+  }));
+}
+
+function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd && bStart < aEnd;
+}
+
 function BookingForm({
   business,
   bookedAppointments,
+  scheduleOverrides,
 }: {
   business: Business;
   bookedAppointments: Appointment[];
+  scheduleOverrides: ScheduleOverride[];
 }) {
   const services = business.services;
   const serviceDurationMin = useMemo(
@@ -114,6 +133,11 @@ function BookingForm({
   const [dogName, setDogName] = useState("");
   const [breed, setBreed] = useState("");
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // Seeded from the one-time fetch on page load, refreshed right before
+  // submit — the picker above can otherwise go stale if someone spends a
+  // few minutes filling in the form while another booking comes in.
+  const [liveAppointments, setLiveAppointments] = useState(bookedAppointments);
 
   const results = useMemo(() => {
     if (!service) return [];
@@ -121,15 +145,17 @@ function BookingForm({
     const today = new Date();
     return findAvailableSlots({
       business,
-      appointments: bookedAppointments,
+      scheduleOverrides,
+      appointments: liveAppointments,
       dogById: emptyDogById,
       ownerById: emptyOwnerById,
       durationMin,
       rangeStart: today,
       rangeEnd: addDays(today, 45),
-      limit: 8,
+      limit: 40,
+      allSlotsPerGap: true,
     });
-  }, [business, service, bookedAppointments, serviceDurationMin]);
+  }, [business, service, liveAppointments, scheduleOverrides, serviceDurationMin]);
 
   const canSubmit =
     Boolean(service && selected) && ownerName.trim().length > 0 && dogName.trim().length > 0;
@@ -137,13 +163,36 @@ function BookingForm({
   async function handleSubmit() {
     if (!canSubmit || !selected) return;
     setSubmitState("submitting");
+    setSubmitError(null);
+
+    // Re-check against a fresh read right before writing — the list the
+    // picker was built from could already be a few minutes stale. This is
+    // just a fast-fail for a better error message; the Apps Script itself
+    // is still the real, atomic guard against a genuine race.
+    const durationMin = serviceDurationMin[service];
+    const fresh = await fetchReservas(business.name, business.username);
+    const freshAppointments = toAppointments(fresh);
+    setLiveAppointments(freshAppointments);
+    const selectedEnd = selected.slotStartMin + durationMin;
+    const stillFree = !freshAppointments.some(
+      (a) =>
+        a.date === selected.date &&
+        rangesOverlap(selected.slotStartMin, selectedEnd, a.startMin, a.startMin + a.durationMin)
+    );
+    if (!stillFree) {
+      setSubmitState("error");
+      setSubmitError("slot_taken");
+      setSelected(null);
+      return;
+    }
+
     const result = await createAppointmentInSheet({
       id: crypto.randomUUID(),
       negocio: business.name,
       usuario: business.username,
       date: selected.date,
       startMin: selected.slotStartMin,
-      durationMin: serviceDurationMin[service],
+      durationMin,
       service,
       ownerName: ownerName.trim(),
       phone: phone.trim(),
@@ -153,6 +202,7 @@ function BookingForm({
       origin: "web",
     });
     setSubmitState(result.ok ? "done" : "error");
+    if (!result.ok) setSubmitError(result.error ?? null);
   }
 
   if (submitState === "done") {
@@ -293,7 +343,9 @@ function BookingForm({
 
       {submitState === "error" && (
         <p className="text-center text-[13px] text-destructive">
-          No se pudo confirmar la cita. Inténtalo de nuevo.
+          {submitError === "slot_taken"
+            ? "Ese hueco se acaba de ocupar. Elige otra hora."
+            : "No se pudo confirmar la cita. Inténtalo de nuevo."}
         </p>
       )}
 

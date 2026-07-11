@@ -33,6 +33,11 @@ export async function postToAppsScript(payload: Record<string, unknown>): Promis
   try {
     parsed = JSON.parse(text);
   } catch {
+    // Apps Script returns HTML for things like an expired auth grant or a
+    // quota error, not the JSON this bridge expects — log the raw body
+    // server-side (Netlify function logs) so that's diagnosable, since the
+    // client only ever sees the generic error below.
+    console.error("Apps Script returned a non-JSON body:", text.slice(0, 500));
     return { ok: false, status: 502, body: { ok: false, error: "invalid upstream response" } };
   }
 
