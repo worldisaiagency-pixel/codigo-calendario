@@ -1,10 +1,22 @@
 import { create } from "zustand";
 import type { Appointment, Dog, Owner } from "./types";
-import type { Business, BusinessProfile, ScheduleOverride } from "./data";
-import { saveProfileToSheet } from "./data";
+import type { Business, BusinessProfile, PendingReserva, ScheduleOverride } from "./data";
+import {
+  saveProfileToSheet,
+  fetchReservas,
+  createAppointmentInSheet,
+  updateAppointmentInSheet,
+  deleteAppointmentFromSheet,
+} from "./data";
 import { toDateKey } from "./time";
 import { createLocalTable } from "./realtime/local-table";
 import type { RealtimeChangePayload, RealtimeTable } from "./realtime/types";
+
+// How often each open app polls the shared "Reservas" sheet for bookings
+// made elsewhere (the public website, or this same business on another
+// device) — gviz's public CSV export itself lags up to ~1 min behind writes,
+// so polling faster than that wouldn't surface anything sooner.
+const RESERVAS_POLL_MS = 45_000;
 
 interface NewAppointmentInput {
   ownerName: string;
@@ -35,6 +47,10 @@ interface AppState {
   addAppointment: (input: NewAppointmentInput) => Appointment;
   removeAppointment: (id: string) => void;
   updateAppointment: (id: string, patch: Partial<Appointment>) => void;
+  /** Idempotently imports one row pulled from the shared "Reservas" sheet
+   * (a booking made on the website, or by this business on another device)
+   * into the local tables — a no-op if that id is already present. */
+  mergeRemoteAppointment: (row: PendingReserva) => void;
   addScheduleOverride: (override: Omit<ScheduleOverride, "id">) => ScheduleOverride;
   removeScheduleOverride: (id: string) => void;
   /** Patches services/hours/vacations, updates the UI immediately, and
@@ -53,6 +69,7 @@ let appointmentsTable: RealtimeTable<Appointment> | null = null;
 let dogsTable: RealtimeTable<Dog> | null = null;
 let ownersTable: RealtimeTable<Owner> | null = null;
 let scheduleOverridesTable: RealtimeTable<ScheduleOverride> | null = null;
+let reservasPollId: ReturnType<typeof setInterval> | null = null;
 
 function reduceList<T extends { id: string }>(
   rows: T[],
@@ -109,11 +126,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     const unsubOverrides = scheduleOverridesTable.subscribe((payload) =>
       set((s) => ({ scheduleOverrides: reduceList(s.scheduleOverrides, payload) }))
     );
+
+    // Pull in anything booked elsewhere (the public website, or this same
+    // business on another device) — once on load, then on a timer for as
+    // long as this business stays logged in here.
+    const pullReservas = () => {
+      fetchReservas(business.name, business.username).then((rows) => {
+        for (const row of rows) get().mergeRemoteAppointment(row);
+      });
+    };
+    pullReservas();
+    reservasPollId = setInterval(pullReservas, RESERVAS_POLL_MS);
+
     return () => {
       unsubAppt();
       unsubDogs();
       unsubOwners();
       unsubOverrides();
+      if (reservasPollId) clearInterval(reservasPollId);
     };
   },
 
@@ -141,8 +171,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     }
 
+    // A real (not per-device-counter) id: this appointment's id is also the
+    // key it's written to the shared Reservas sheet under, so it must not
+    // collide with one generated on a different device.
     const newAppt: Appointment = {
-      id: `a-new-${seq++}`,
+      id: crypto.randomUUID(),
       dogId,
       ownerId,
       date: input.date,
@@ -152,12 +185,86 @@ export const useAppStore = create<AppState>((set, get) => ({
       status: "confirmed",
     };
     appointmentsTable.insert(newAppt);
+
+    const { business } = get();
+    if (business) {
+      // Fire-and-forget, same as updateProfile's write-back: the local
+      // insert above is already the source of truth for this device: a
+      // failed sync just means other devices/the website won't see it until
+      // the next successful poll, not that the booking itself is lost.
+      createAppointmentInSheet({
+        id: newAppt.id,
+        negocio: business.name,
+        usuario: business.username,
+        date: newAppt.date,
+        startMin: newAppt.startMin,
+        durationMin: newAppt.durationMin,
+        service: newAppt.service,
+        ownerName: input.ownerName,
+        phone: input.phone ?? "",
+        dogName: input.dogName,
+        breed: input.breed ?? "",
+        status: newAppt.status,
+        origin: "app",
+      });
+    }
+
     return newAppt;
   },
 
-  removeAppointment: (id) => appointmentsTable?.remove(id),
+  removeAppointment: (id) => {
+    appointmentsTable?.remove(id);
+    deleteAppointmentFromSheet({ id });
+  },
 
-  updateAppointment: (id, patch) => appointmentsTable?.update(id, patch),
+  updateAppointment: (id, patch) => {
+    appointmentsTable?.update(id, patch);
+    updateAppointmentInSheet({
+      id,
+      date: patch.date,
+      startMin: patch.startMin,
+      durationMin: patch.durationMin,
+      service: patch.service,
+      status: patch.status,
+    });
+  },
+
+  mergeRemoteAppointment: (row) => {
+    if (!appointmentsTable || !dogsTable || !ownersTable) return;
+    const { appointments, dogs, owners } = get();
+    if (appointments.some((a) => a.id === row.id)) return;
+
+    let owner = row.phone ? owners.find((o) => o.phone === row.phone) : undefined;
+    if (!owner) {
+      owner = { id: crypto.randomUUID(), name: row.ownerName, phone: row.phone };
+      ownersTable.insert(owner);
+    }
+
+    let dog = dogs.find(
+      (d) => d.ownerId === owner!.id && d.name.toLowerCase() === row.dogName.toLowerCase()
+    );
+    if (!dog) {
+      dog = {
+        id: crypto.randomUUID(),
+        name: row.dogName,
+        breed: row.breed || "Sin especificar",
+        ownerId: owner.id,
+        avgDurationMin: row.durationMin,
+      };
+      dogsTable.insert(dog);
+    }
+
+    appointmentsTable.insert({
+      id: row.id,
+      dogId: dog.id,
+      ownerId: owner.id,
+      date: row.date,
+      startMin: row.startMin,
+      durationMin: row.durationMin,
+      service: row.service,
+      status: row.status,
+    });
+  },
 
   addScheduleOverride: (override) => {
     if (!scheduleOverridesTable) {

@@ -11,7 +11,12 @@ export {
   updateBusinessIdentity,
   createBusinessInSheet,
   deleteBusinessFromSheet,
+  createAppointmentInSheet,
+  updateAppointmentInSheet,
+  deleteAppointmentFromSheet,
 } from "./sheets-writer";
+export { fetchReservas } from "./reservas-sync";
+export type { PendingReserva } from "./reservas-sync";
 export { emptyProfile, emptyHours, isProfileConfigured, WEEKDAYS } from "./types";
 
 export type {

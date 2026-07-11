@@ -81,3 +81,64 @@ export async function deleteBusinessFromSheet(params: {
     usuario: params.usuario,
   });
 }
+
+/** Appends one row to the shared "Reservas" tab — called both by the app's
+ * own store (origin "app") and the public booking page (origin "web"), so
+ * every appointment, wherever it was made, ends up in the same queue. */
+export async function createAppointmentInSheet(params: {
+  id: string;
+  negocio: string;
+  usuario: string;
+  date: string;
+  startMin: number;
+  durationMin: number;
+  service: string;
+  ownerName: string;
+  phone: string;
+  dogName: string;
+  breed: string;
+  status: string;
+  origin: "app" | "web";
+}): Promise<boolean> {
+  return postToSheetBridge({
+    action: "createAppointment",
+    id: params.id,
+    negocio: params.negocio,
+    usuario: params.usuario,
+    fecha: params.date,
+    inicioMin: params.startMin,
+    duracionMin: params.durationMin,
+    servicio: params.service,
+    cliente: params.ownerName,
+    telefono: params.phone,
+    perro: params.dogName,
+    raza: params.breed,
+    estado: params.status,
+    origen: params.origin,
+  });
+}
+
+/** Patches only the fields provided (used by the app's reschedule/rebooking
+ * flow) — leaves everything else in that Reservas row untouched. */
+export async function updateAppointmentInSheet(params: {
+  id: string;
+  date?: string;
+  startMin?: number;
+  durationMin?: number;
+  service?: string;
+  status?: string;
+}): Promise<boolean> {
+  return postToSheetBridge({
+    action: "updateAppointment",
+    id: params.id,
+    fecha: params.date,
+    inicioMin: params.startMin,
+    duracionMin: params.durationMin,
+    servicio: params.service,
+    estado: params.status,
+  });
+}
+
+export async function deleteAppointmentFromSheet(params: { id: string }): Promise<boolean> {
+  return postToSheetBridge({ action: "deleteAppointment", id: params.id });
+}

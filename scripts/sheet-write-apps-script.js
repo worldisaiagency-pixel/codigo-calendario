@@ -46,6 +46,9 @@ function doPost(e) {
     if (action === "updateIdentity") return handleUpdateIdentity(sheet, body);
     if (action === "createBusiness") return handleCreateBusiness(sheet, body);
     if (action === "deleteBusiness") return handleDeleteBusiness(sheet, body);
+    if (action === "createAppointment") return handleCreateAppointment(body);
+    if (action === "updateAppointment") return handleUpdateAppointment(body);
+    if (action === "deleteAppointment") return handleDeleteAppointment(body);
     return jsonResponse({ ok: false, error: "unknown action" });
   } catch (err) {
     return jsonResponse({ ok: false, error: String(err) });
@@ -167,6 +170,113 @@ function handleDeleteBusiness(sheet, body) {
 
   sheet.deleteRows(block.startRow, block.numRows);
   return jsonResponse({ ok: true });
+}
+
+// --- Appointments (shared booking queue: app <-> public website) -----------
+//
+// Lives on its own "Reservas" tab (created on first use), separate from the
+// NEGOCIO/USUARIO identity blocks above — one row per appointment, not the
+// label/value block format. Every cell in a written row is forced to Plain
+// text ("@") BEFORE the value is set, so Sheets never silently reinterprets
+// FECHA ("2026-07-15") as a real Date and reformats it on CSV export.
+
+const RESERVAS_SHEET_NAME = "Reservas";
+const RESERVAS_HEADERS = [
+  "ID", "NEGOCIO", "USUARIO", "FECHA", "INICIO_MIN", "DURACION_MIN",
+  "SERVICIO", "CLIENTE", "TELEFONO", "PERRO", "RAZA", "ESTADO", "ORIGEN",
+];
+
+function getOrCreateReservasSheet() {
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(RESERVAS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(RESERVAS_SHEET_NAME);
+    sheet.appendRow(RESERVAS_HEADERS);
+  }
+  return sheet;
+}
+
+// Created by either the business's own app or the public booking page
+// (see src/app/reservar). The caller always sends its own `id` (a UUID) so
+// retries/re-syncs stay idempotent instead of appending duplicates.
+function handleCreateAppointment(body) {
+  const id = String(body.id || Utilities.getUuid()).trim();
+  const negocio = String(body.negocio || "").trim();
+  const usuario = String(body.usuario || "").trim();
+  const fecha = String(body.fecha || "").trim();
+  if (!id || !negocio || !usuario || !fecha) {
+    return jsonResponse({ ok: false, error: "missing fields" });
+  }
+
+  const sheet = getOrCreateReservasSheet();
+  const row = sheet.getLastRow() + 1;
+  const range = sheet.getRange(row, 1, 1, RESERVAS_HEADERS.length);
+  range.setNumberFormat("@");
+  range.setValues([[
+    id,
+    negocio,
+    usuario,
+    fecha,
+    String(Number(body.inicioMin) || 0),
+    String(Number(body.duracionMin) || 0),
+    String(body.servicio || ""),
+    String(body.cliente || ""),
+    String(body.telefono || ""),
+    String(body.perro || ""),
+    String(body.raza || ""),
+    String(body.estado || "confirmed"),
+    String(body.origen || "app"),
+  ]]);
+  return jsonResponse({ ok: true, id: id });
+}
+
+// Used when the business reschedules an appointment from the app (e.g. the
+// auto-rebooking flow). Only touches the fields the caller actually sends.
+function handleUpdateAppointment(body) {
+  const id = String(body.id || "").trim();
+  if (!id) return jsonResponse({ ok: false, error: "missing id" });
+
+  const sheet = getOrCreateReservasSheet();
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() !== id) continue;
+    const row = i + 1;
+    if (body.fecha != null) {
+      const cell = sheet.getRange(row, 4);
+      cell.setNumberFormat("@").setValue(String(body.fecha));
+    }
+    if (body.inicioMin != null) {
+      const cell = sheet.getRange(row, 5);
+      cell.setNumberFormat("@").setValue(String(Number(body.inicioMin)));
+    }
+    if (body.duracionMin != null) {
+      const cell = sheet.getRange(row, 6);
+      cell.setNumberFormat("@").setValue(String(Number(body.duracionMin)));
+    }
+    if (body.servicio != null) {
+      sheet.getRange(row, 7).setValue(String(body.servicio));
+    }
+    if (body.estado != null) {
+      sheet.getRange(row, 12).setValue(String(body.estado));
+    }
+    return jsonResponse({ ok: true });
+  }
+  return jsonResponse({ ok: false, error: "appointment not found" });
+}
+
+function handleDeleteAppointment(body) {
+  const id = String(body.id || "").trim();
+  if (!id) return jsonResponse({ ok: false, error: "missing id" });
+
+  const sheet = getOrCreateReservasSheet();
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === id) {
+      sheet.deleteRow(i + 1);
+      return jsonResponse({ ok: true });
+    }
+  }
+  return jsonResponse({ ok: false, error: "appointment not found" });
 }
 
 // --- Helpers -----------------------------------------------------------
