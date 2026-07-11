@@ -15,6 +15,7 @@ import type { ClientContext } from "@/components/appointment/client-detail-body"
 import { GlobalSearch } from "@/components/search/global-search";
 import { LoginScreen } from "@/components/auth/login-screen";
 import { AdminPanel } from "@/components/admin/admin-panel";
+import { WorldworkFooter } from "@/components/worldwork-footer";
 import { BusinessMenuSheet } from "@/components/business/business-menu-sheet";
 import { ScheduleOverrideSheet } from "@/components/business/schedule-override-sheet";
 import { ProfileSheet } from "@/components/business/profile-sheet";
@@ -264,6 +265,7 @@ export default function Home() {
             onSelectDay={handleSelectDay}
           />
         )}
+        <WorldworkFooter />
       </div>
 
       <DesktopSidePanel context={clientContext} />

@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { Moon, Sun } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { dataProvider } from "@/lib/data";
 import type { Business } from "@/lib/data";
 import { isAdminCredentials } from "@/lib/auth/admin";
+import { useThemeToggle } from "@/hooks/use-theme-toggle";
+import { WorldworkFooter } from "@/components/worldwork-footer";
 
 export function LoginScreen({
   onSuccess,
@@ -18,6 +21,7 @@ export function LoginScreen({
   const [usuario, setUsuario] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { isDark, toggle: toggleTheme, mounted: themeMounted } = useThemeToggle();
 
   const canSubmit = negocio.trim().length > 0 && usuario.trim().length > 0 && !loading;
 
@@ -50,7 +54,22 @@ export function LoginScreen({
   }
 
   return (
-    <div className="flex h-dvh w-full flex-col items-center justify-center bg-canvas px-6">
+    <div className="relative flex h-dvh w-full flex-col items-center justify-center bg-canvas px-6">
+      {themeMounted && (
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label={isDark ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
+          className="safe-top absolute right-4 top-4 flex size-10 items-center justify-center rounded-full bg-secondary text-muted-foreground transition-colors duration-150 active:bg-accent"
+        >
+          {isDark ? (
+            <Sun className="size-[18px]" strokeWidth={2} />
+          ) : (
+            <Moon className="size-[18px]" strokeWidth={2} />
+          )}
+        </button>
+      )}
+
       <div className="w-full max-w-xs">
         <div className="mb-8 text-center">
           <h1 className="text-[22px] font-semibold tracking-tight">Agenda</h1>
@@ -95,6 +114,10 @@ export function LoginScreen({
             {loading ? "Comprobando…" : "Iniciar sesión"}
           </button>
         </form>
+      </div>
+
+      <div className="safe-bottom absolute bottom-0 left-0 right-0">
+        <WorldworkFooter />
       </div>
     </div>
   );

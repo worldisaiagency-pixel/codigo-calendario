@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, LogOut, Trash2, UserCog } from "lucide-react";
+import { CalendarClock, LogOut, Moon, Sun, Trash2, UserCog } from "lucide-react";
 import {
   Drawer,
   DrawerContent,
@@ -10,6 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { formatDayHeading, minToLabel, parseDateKey } from "@/lib/time";
+import { useThemeToggle } from "@/hooks/use-theme-toggle";
 import type { Business, ScheduleOverride } from "@/lib/data";
 
 function describeOverride(o: ScheduleOverride): string {
@@ -41,6 +42,7 @@ export function BusinessMenuSheet({
   onLogout: () => void;
 }) {
   const removeScheduleOverride = useAppStore((s) => s.removeScheduleOverride);
+  const { isDark, toggle: toggleTheme, mounted: themeMounted } = useThemeToggle();
 
   const upcoming = [...scheduleOverrides].sort((a, b) => (a.date < b.date ? -1 : 1));
 
@@ -77,6 +79,24 @@ export function BusinessMenuSheet({
               </span>
               <span className="text-[15px] font-medium">Modificar horario temporalmente</span>
             </button>
+            {themeMounted && (
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-accent transition-colors"
+              >
+                <span className="flex size-8 items-center justify-center rounded-full bg-slot-alert-tint text-slot-alert shrink-0">
+                  {isDark ? (
+                    <Sun className="size-[17px]" strokeWidth={2} />
+                  ) : (
+                    <Moon className="size-[17px]" strokeWidth={2} />
+                  )}
+                </span>
+                <span className="text-[15px] font-medium">
+                  {isDark ? "Tema claro" : "Tema oscuro"}
+                </span>
+              </button>
+            )}
             <button
               type="button"
               onClick={onLogout}
