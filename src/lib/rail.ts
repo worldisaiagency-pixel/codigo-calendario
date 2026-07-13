@@ -1,6 +1,6 @@
 import type { Appointment, Dog, Owner, RailBlock } from "./types";
 import type { DaySchedule, ManualBlock } from "./data";
-import { MIN_BOOKABLE_GAP, nowMinutes } from "./time";
+import { MIN_BOOKABLE_GAP, earliestBookableStart, nowMinutes } from "./time";
 
 type Occupied =
   | { kind: "appt"; startMin: number; durationMin: number; appointment: Appointment }
@@ -57,7 +57,11 @@ export function buildRail(params: {
     blocks.push({ kind: "closed", startMin: 0, durationMin: schedule.open });
   }
 
-  let cursor = schedule.open;
+  // Same rule the availability search already applies (earliestBookableStart):
+  // today's free gaps never start before "now" rounded up — no separate
+  // validation needed downstream, since every tappable slot already derives
+  // from this.
+  let cursor = earliestBookableStart(schedule.open, isToday);
 
   for (const item of occupied) {
     const gap = item.startMin - cursor;

@@ -96,6 +96,14 @@ function parseDurationToken(token: string): number | null {
   return matched ? Math.round(total) : null;
 }
 
+// Accepts old-format cells too ("30 €", "25€") so existing businesses'
+// already-saved lines keep reading correctly — only the number is kept.
+function parsePrice(token: string | undefined): number {
+  if (!token) return 0;
+  const n = parseFloat(token.replace(/[^\d.,]/g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : 0;
+}
+
 function parseServiceLine(line: string): BusinessService | null {
   const parts = line
     .split("·")
@@ -109,7 +117,7 @@ function parseServiceLine(line: string): BusinessService | null {
   const durationMin = durationPart ? parseDurationToken(durationPart) : null;
   if (!name || durationMin == null) return null;
 
-  return { name, priceLabel: pricePart ?? "", durationMin };
+  return { name, price: parsePrice(pricePart), durationMin };
 }
 
 function emptyHours(): Record<Weekday, DaySchedule | null> {

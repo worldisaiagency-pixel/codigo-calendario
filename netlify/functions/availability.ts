@@ -106,7 +106,14 @@ const handler = async (req: Request) => {
 
   return json({
     ok: true,
-    services: business.services,
+    // The external booking widget expects a ready-to-display price string
+    // (its own priceLabel field) — formatted only here, at the response
+    // boundary, so the internal model stays a plain number.
+    services: business.services.map((s) => ({
+      name: s.name,
+      priceLabel: s.price > 0 ? `${s.price}€` : "",
+      durationMin: s.durationMin,
+    })),
     slots: slots.map((s) => ({ date: s.date, startMin: s.slotStartMin, durationMin: service.durationMin })),
   });
 };

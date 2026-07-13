@@ -91,7 +91,7 @@ export function ProfileSheet({
   }
 
   function addService() {
-    setServices((prev) => [...prev, { name: "", priceLabel: "", durationMin: 30 }]);
+    setServices((prev) => [...prev, { name: "", price: 0, durationMin: 30 }]);
   }
   function updateService(i: number, patch: Partial<BusinessService>) {
     setServices((prev) => prev.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
@@ -201,12 +201,21 @@ export function ProfileSheet({
                     </button>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Input
-                      value={s.priceLabel}
-                      onChange={(e) => updateService(i, { priceLabel: e.target.value })}
-                      placeholder="Precio (ej. 25€)"
-                      className="h-10 text-[14px] rounded-xl bg-background border-0 px-3 flex-1"
-                    />
+                    <div className="flex items-center gap-1.5 flex-1">
+                      {/* price is a plain number end to end — the € here is
+                       * purely visual, never part of the stored value. */}
+                      <Input
+                        value={s.price > 0 ? String(s.price) : ""}
+                        onChange={(e) => {
+                          const digits = e.target.value.replace(/[^\d]/g, "");
+                          updateService(i, { price: digits ? Number(digits) : 0 });
+                        }}
+                        placeholder="Precio"
+                        inputMode="numeric"
+                        className="h-10 text-[14px] rounded-xl bg-background border-0 px-3 flex-1"
+                      />
+                      <span className="text-[12.5px] text-muted-foreground shrink-0">€</span>
+                    </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       <input
                         type="number"

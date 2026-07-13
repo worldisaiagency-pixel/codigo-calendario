@@ -124,6 +124,9 @@ export function NewAppointmentSheet({
   // above, so it's indistinguishable from a grid pick once applied.
   const isCustomSelected = !timeOptions.includes(clampedStartOffset);
 
+  // Applies live as the native wheel moves — no confirm step, matching how
+  // a native time picker behaves. The panel itself stays open until the
+  // user picks a quick option instead or dismisses it explicitly.
   function applyCustomTime(hhmm: string) {
     if (!slot) return;
     const [hh, mm] = hhmm.split(":").map(Number);
@@ -134,7 +137,6 @@ export function NewAppointmentSheet({
       return;
     }
     setStartOffset(offset);
-    setCustomTimeOpen(false);
   }
 
   useEffect(() => {
@@ -409,8 +411,23 @@ export function NewAppointmentSheet({
 
           {service && timeOptions.length > 1 && (
             <div>
-              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2 px-1">
-                Hora de inicio
+              <div className="flex items-baseline justify-between mb-2 px-1">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Hora de inicio
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismissKeyboard();
+                    setCustomTimeOpen((v) => !v);
+                  }}
+                  className={cn(
+                    "text-[12.5px] font-medium transition-colors",
+                    isCustomSelected ? "text-primary" : "text-muted-foreground active:text-foreground"
+                  )}
+                >
+                  {isCustomSelected ? minToLabel(actualStartMin) : "Hora personalizada"}
+                </button>
               </div>
               <TimeGridPicker
                 baseMin={slot?.startMin ?? 0}
@@ -421,28 +438,15 @@ export function NewAppointmentSheet({
                   setCustomTimeOpen(false);
                   setStartOffset(o);
                 }}
-                trailing={{
-                  label: isCustomSelected ? minToLabel(actualStartMin) : "Personalizar",
-                  active: isCustomSelected,
-                  onClick: () => {
-                    dismissKeyboard();
-                    setCustomTimeOpen((v) => !v);
-                  },
-                }}
               />
               {customTimeOpen && (
-                <label className="block mt-2">
-                  <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2 px-1">
-                    Hora personalizada
-                  </div>
-                  <input
-                    type="time"
-                    step={300}
-                    defaultValue={minToLabel(actualStartMin)}
-                    onChange={(e) => applyCustomTime(e.target.value)}
-                    className="tabular w-full h-12 rounded-2xl bg-secondary px-4 text-[16px]"
-                  />
-                </label>
+                <input
+                  type="time"
+                  step={300}
+                  defaultValue={minToLabel(actualStartMin)}
+                  onChange={(e) => applyCustomTime(e.target.value)}
+                  className="tabular w-full h-12 rounded-2xl bg-secondary px-4 text-[16px] mt-2"
+                />
               )}
             </div>
           )}

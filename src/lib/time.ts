@@ -116,6 +116,16 @@ export function nowMinutes(): number {
   return n.getHours() * 60 + n.getMinutes();
 }
 
+/** The earliest minute-of-day that can still be booked/shown as free — for
+ * today, that's "now" rounded up to the next 30-min mark (never earlier than
+ * opening); for any other day, just the opening time itself. Single source
+ * of truth shared by availability search (findAvailableSlots) and the
+ * calendar's own free-gap builder (buildRail), so "no past times" is
+ * enforced identically everywhere instead of duplicated per caller. */
+export function earliestBookableStart(open: number, isToday: boolean): number {
+  return isToday ? Math.max(open, Math.ceil(nowMinutes() / 30) * 30) : open;
+}
+
 /** Derived, not stored: an appointment is "completed" purely from the
  * current moment vs. its own date/startMin/durationMin — no separate status
  * to keep in sync. A past date is always completed; a future date never is;

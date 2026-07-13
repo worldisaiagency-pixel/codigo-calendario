@@ -2,7 +2,7 @@ import type { Appointment, Dog, Owner } from "./types";
 import type { Business, ScheduleOverride } from "./data";
 import { resolveDay } from "./data";
 import { buildRail } from "./rail";
-import { addDays, isSameDay, nowMinutes, toDateKey } from "./time";
+import { addDays, earliestBookableStart, isSameDay, toDateKey } from "./time";
 
 export interface AvailabilitySlot {
   date: string;
@@ -80,9 +80,7 @@ export function findAvailableSlots(params: {
       schedule,
       manualBlocks,
     });
-    const earliestStart = isToday
-      ? Math.max(schedule.open, Math.ceil(nowMinutes() / 30) * 30)
-      : schedule.open;
+    const earliestStart = earliestBookableStart(schedule.open, isToday);
 
     for (const block of blocks) {
       if (block.kind !== "free") continue;

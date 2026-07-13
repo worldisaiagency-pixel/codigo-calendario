@@ -16,7 +16,7 @@ const WEEKDAY_LABELS: Record<Weekday, string> = {
 /** "Nombre · Precio · Duración" — mirrors sheets-provider.ts's parseServiceLine. */
 export function formatServiceLine(s: BusinessService): string {
   const parts = [s.name.trim()];
-  if (s.priceLabel.trim()) parts.push(s.priceLabel.trim());
+  if (s.price > 0) parts.push(String(s.price));
   parts.push(durationLabel(s.durationMin));
   return parts.join(" · ");
 }

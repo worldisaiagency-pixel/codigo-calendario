@@ -181,12 +181,23 @@ export const useAppStore = create<AppState>((set, get) => ({
     pullReservas();
     reservasPollId = setInterval(pullReservas, RESERVAS_POLL_MS);
 
+    // The 45s timer is the floor for "still staring at an unfocused tab",
+    // but the common cross-device case — book on the phone, then switch
+    // back to the already-open desktop tab — doesn't need to wait for that:
+    // re-pull immediately the moment this tab regains focus, reusing the
+    // exact same pullReservas, no separate fetch path.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") pullReservas();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
     return () => {
       unsubAppt();
       unsubDogs();
       unsubOwners();
       unsubOverrides();
       if (reservasPollId) clearInterval(reservasPollId);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   },
 

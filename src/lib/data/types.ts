@@ -11,7 +11,10 @@ export type Weekday =
 
 export interface BusinessService {
   name: string;
-  priceLabel: string;
+  /** Plain numeric value, no currency symbol — the € is added only where
+   * displayed (ProfileSheet's editor, and the external availability.ts
+   * response for the public booking widget). Never stored formatted. */
+  price: number;
   durationMin: number;
 }
 
