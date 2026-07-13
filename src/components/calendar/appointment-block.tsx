@@ -1,8 +1,8 @@
 "use client";
 
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { minToLabel, relativeTimeUntil } from "@/lib/time";
+import { isAppointmentCompleted, minToLabel, relativeTimeUntil } from "@/lib/time";
 import { minutesToPx } from "@/lib/scale";
 import type { RailBlock } from "@/lib/types";
 
@@ -18,6 +18,13 @@ export function AppointmentBlock({
   const heightPx = minutesToPx(block.durationMin);
   const compact = heightPx < 64;
   const hasAlert = Boolean(block.dog.behaviorNote);
+  // Derived purely from the clock vs. this appointment's own end time — no
+  // stored status to keep in sync (see isAppointmentCompleted).
+  const completed = isAppointmentCompleted(
+    block.appointment.date,
+    block.startMin,
+    block.durationMin
+  );
 
   return (
     <button
@@ -27,15 +34,17 @@ export function AppointmentBlock({
       className={cn(
         "group relative w-full text-left rounded-2xl px-4 transition-transform duration-150 ease-out active:scale-[0.98]",
         "flex flex-col justify-center gap-0.5 overflow-hidden",
-        block.isNext
-          ? "bg-slot-next-tint active:brightness-95"
-          : "bg-card shadow-[var(--shadow)] active:bg-accent/60"
+        completed
+          ? "bg-secondary/70 active:bg-accent/60"
+          : block.isNext
+            ? "bg-slot-next-tint active:brightness-95"
+            : "bg-card shadow-[var(--shadow)] active:bg-accent/60"
       )}
     >
       <span
         className={cn(
           "absolute left-0 top-1/2 -translate-y-1/2 h-[60%] w-[3px] rounded-full",
-          block.isNext ? "bg-slot-next" : "bg-slot-busy/25"
+          completed ? "bg-slot-free/40" : block.isNext ? "bg-slot-next" : "bg-slot-busy/25"
         )}
       />
       <div className="pl-2 flex items-start justify-between gap-2">
@@ -49,7 +58,7 @@ export function AppointmentBlock({
             <span className="tabular text-[13px] text-muted-foreground shrink-0">
               {minToLabel(block.startMin)}
             </span>
-            <span className="font-semibold text-[15px] truncate">
+            <span className={cn("font-semibold text-[15px] truncate", completed && "text-foreground/70")}>
               {block.dog.name}
             </span>
             <span className="text-[13px] text-muted-foreground truncate">
@@ -59,6 +68,12 @@ export function AppointmentBlock({
           {!compact && (
             <div className="pl-[52px] text-[13px] text-muted-foreground truncate">
               {block.appointment.service}
+            </div>
+          )}
+          {completed && !compact && (
+            <div className="pl-[52px] flex items-center gap-1 text-[11.5px] text-slot-free mt-0.5">
+              <CheckCircle2 className="size-3" strokeWidth={2.25} />
+              Cita completada
             </div>
           )}
         </div>

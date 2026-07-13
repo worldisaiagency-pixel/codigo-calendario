@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   Drawer,
   DrawerContent,
@@ -8,7 +9,12 @@ import {
 } from "@/components/ui/drawer";
 import { useAppStore } from "@/lib/store";
 import { ClientDetailBody, type ClientContext } from "./client-detail-body";
-import { toast } from "sonner";
+import { NotifyClientsSheet, type NotifyRecipient } from "@/components/business/notify-clients-sheet";
+
+/** Two steps in the same Drawer — "detail" then "notify" — mirroring
+ * schedule-override-sheet.tsx's own step swap instead of opening a second,
+ * stacked Drawer once the appointment is cancelled. */
+type Step = "detail" | "notify";
 
 export function ClientSheet({
   context,
@@ -17,14 +23,26 @@ export function ClientSheet({
   context: ClientContext | null;
   onOpenChange: (open: boolean) => void;
 }) {
-  const removeAppointment = useAppStore((s) => s.removeAppointment);
+  const business = useAppStore((s) => s.business);
   const open = context !== null;
 
-  function handleCancel() {
-    if (!context?.appointment) return;
-    removeAppointment(context.appointment.id);
-    toast(`Cita cancelada · ${context.dog.name}`);
-    onOpenChange(false);
+  const [step, setStep] = useState<Step>("detail");
+  const [cancelledRecipient, setCancelledRecipient] = useState<NotifyRecipient | null>(null);
+
+  // Reset back to "detail" whenever a different client is opened (or this
+  // one is reopened) — adjusting state during render keeps this synchronous.
+  const [lastContext, setLastContext] = useState<ClientContext | null>(null);
+  if (context !== lastContext) {
+    setLastContext(context);
+    if (context) {
+      setStep("detail");
+      setCancelledRecipient(null);
+    }
+  }
+
+  function handleCancelled(recipient: NotifyRecipient) {
+    setCancelledRecipient(recipient);
+    setStep("notify");
   }
 
   return (
@@ -33,13 +51,21 @@ export function ClientSheet({
         <DrawerHeader className="sr-only">
           <DrawerTitle>Ficha del cliente</DrawerTitle>
         </DrawerHeader>
-        {context && (
+        {step === "detail" && context && (
           <div
             className="px-5 pt-1 overflow-y-auto overscroll-contain"
             style={{ paddingBottom: "max(28px, env(safe-area-inset-bottom))" }}
           >
-            <ClientDetailBody context={context} onCancel={handleCancel} />
+            <ClientDetailBody context={context} onCancelled={handleCancelled} />
           </div>
+        )}
+        {step === "notify" && cancelledRecipient && business && (
+          <NotifyClientsSheet
+            type="appointmentCancelled"
+            business={business}
+            recipients={[cancelledRecipient]}
+            onDone={() => onOpenChange(false)}
+          />
         )}
       </DrawerContent>
     </Drawer>

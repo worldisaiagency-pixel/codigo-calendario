@@ -9,6 +9,11 @@ export interface Dog {
   lastService?: string;
   behaviorNote?: string;
   photoColor?: string;
+  /** Manually removed from the search buscador (see src/lib/clients.ts) —
+   * the dog/owner rows and every past appointment stay intact, this only
+   * hides the reusable "ficha" from search results. Cleared automatically
+   * the next time an appointment is created/merged for this dog. */
+  archived?: boolean;
 }
 
 export interface Owner {

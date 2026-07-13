@@ -1,6 +1,7 @@
 import { WEEKDAYS } from "./types";
 import type { BusinessService, DaySchedule, VacationRange, Weekday } from "./types";
 import { durationLabel, minToLabel } from "../time";
+import type { WhatsAppTemplateMap } from "../whatsapp-template";
 
 const WEEKDAY_LABELS: Record<Weekday, string> = {
   lunes: "Lunes",
@@ -56,4 +57,11 @@ export function formatVacationLine(v: VacationRange): string {
     return `${d}/${m}/${y}`;
   };
   return `${toDmy(v.start)} - ${toDmy(v.end)}`;
+}
+
+/** One JSON object holding every template type — mirrors sheets-provider.ts's
+ * parseWhatsAppTemplatesCell. Adding a new template type never changes this
+ * function: whatever keys the map has are just serialized as-is. */
+export function formatWhatsAppTemplatesCell(templates: WhatsAppTemplateMap): string {
+  return JSON.stringify(templates);
 }

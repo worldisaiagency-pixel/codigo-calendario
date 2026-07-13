@@ -116,6 +116,21 @@ export function nowMinutes(): number {
   return n.getHours() * 60 + n.getMinutes();
 }
 
+/** Derived, not stored: an appointment is "completed" purely from the
+ * current moment vs. its own date/startMin/durationMin — no separate status
+ * to keep in sync. A past date is always completed; a future date never is;
+ * today it depends on whether now is past its end time. */
+export function isAppointmentCompleted(
+  date: string,
+  startMin: number,
+  durationMin: number
+): boolean {
+  const today = toDateKey(new Date());
+  if (date < today) return true;
+  if (date > today) return false;
+  return nowMinutes() > startMin + durationMin;
+}
+
 export function relativeTimeUntil(min: number): string {
   const now = nowMinutes();
   const diff = min - now;

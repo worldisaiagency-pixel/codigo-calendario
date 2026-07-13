@@ -58,6 +58,18 @@ export function ScheduleOverrideSheet({
   const [endTime, setEndTime] = useState("20:00");
   const [plan, setPlan] = useState<ScheduleChangePlan | null>(null);
   const [pendingOverrides, setPendingOverrides] = useState<ScheduleOverride[]>([]);
+  // True only while handleConfirm's writes are in flight — drives the
+  // "Reprogramando citas..." spinner state on ScheduleChangeSummary's
+  // buttons (see below) so the sheet never looks frozen while the sequence
+  // of Sheet writes runs.
+  const [confirming, setConfirming] = useState(false);
+  // True once the overrides themselves have been written for this plan —
+  // addScheduleOverride always inserts a fresh row (no dedup), so if a
+  // retry after a partial move failure re-ran it, the closure/block would
+  // get duplicated in the Sheet. Appointment moves are safe to resend
+  // (updateAppointment excludes the appointment's own id from the overlap
+  // check), so only the overrides half of handleConfirm is guarded.
+  const [overridesApplied, setOverridesApplied] = useState(false);
 
   // Reset every time the sheet is (re)opened — adjusting state during
   // render keeps this synchronous, no flash of the previous attempt.
@@ -72,6 +84,8 @@ export function ScheduleOverrideSheet({
       setEndTime("20:00");
       setPlan(null);
       setPendingOverrides([]);
+      setConfirming(false);
+      setOverridesApplied(false);
     }
   }
 
@@ -133,43 +147,64 @@ export function ScheduleOverrideSheet({
   }
 
   async function handleConfirm() {
-    if (!plan) return;
-    for (const o of pendingOverrides) {
-      addScheduleOverride({
-        date: o.date,
-        kind: o.kind,
-        open: o.open,
-        close: o.close,
-        blockStart: o.blockStart,
-        blockEnd: o.blockEnd,
-      });
-    }
+    if (!plan || confirming) return;
+    setConfirming(true);
+    try {
+      if (!overridesApplied) {
+        for (const o of pendingOverrides) {
+          addScheduleOverride({
+            date: o.date,
+            kind: o.kind,
+            open: o.open,
+            close: o.close,
+            blockStart: o.blockStart,
+            blockEnd: o.blockEnd,
+          });
+        }
+        setOverridesApplied(true);
+      }
 
-    let failedCount = 0;
-    for (const move of plan.moves) {
-      const result = await updateAppointment(move.appointment.id, {
-        date: move.toDate,
-        startMin: move.toStartMin,
-      });
-      if (!result.ok) failedCount++;
-    }
-    if (failedCount > 0) {
-      toast.error(
-        failedCount === 1
-          ? "Una cita no se pudo reprogramar (el hueco ya no estaba libre) — revísala en el calendario."
-          : `${failedCount} citas no se pudieron reprogramar (los huecos ya no estaban libres) — revísalas en el calendario.`
-      );
-    }
+      let failedCount = 0;
+      for (const move of plan.moves) {
+        const result = await updateAppointment(move.appointment.id, {
+          date: move.toDate,
+          startMin: move.toStartMin,
+        });
+        if (!result.ok) failedCount++;
+      }
+      if (failedCount > 0) {
+        toast.error(
+          failedCount === 1
+            ? "Una cita no se pudo reprogramar (el hueco ya no estaba libre) — revísala en el calendario."
+            : `${failedCount} citas no se pudieron reprogramar (los huecos ya no estaban libres) — revísalas en el calendario.`
+        );
+        // Stay on the summary step so the business can retry — the
+        // overrides above are already applied and won't be repeated, only
+        // the moves get resent. NotifyClientsSheet never opens on failure.
+        return;
+      }
 
-    if (plan.moves.length > 0) {
-      setStep("notify");
-    } else {
-      onOpenChange(false);
+      if (plan.moves.length > 0) {
+        setStep("notify");
+      } else {
+        onOpenChange(false);
+      }
+    } finally {
+      setConfirming(false);
     }
   }
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer
+      open={open}
+      // Ignore dismiss attempts (backdrop tap, handle drag) while a confirm
+      // is in flight — same intent as disabling the footer buttons, just
+      // covering the drawer's own built-in dismiss gestures too.
+      onOpenChange={(next) => {
+        if (confirming) return;
+        onOpenChange(next);
+      }}
+    >
       <DrawerContent
         className="flex flex-col sm:max-w-md sm:mx-auto overflow-hidden"
       >
@@ -295,13 +330,26 @@ export function ScheduleOverrideSheet({
           <ScheduleChangeSummary
             pendingOverrides={pendingOverrides}
             plan={plan}
+            confirming={confirming}
             onConfirm={handleConfirm}
             onBack={() => setStep("edit")}
           />
         )}
 
-        {step === "notify" && plan && (
-          <NotifyClientsSheet moves={plan.moves} onDone={() => onOpenChange(false)} />
+        {step === "notify" && plan && business && (
+          <NotifyClientsSheet
+            type="appointmentChanged"
+            business={business}
+            recipients={plan.moves.map((m) => ({
+              // The move's new date/time, not the appointment's own
+              // pre-move fields — {fecha}/{hora}/{fecha_hora} must render
+              // the NEW appointment, exactly as before this refactor.
+              appointment: { ...m.appointment, date: m.toDate, startMin: m.toStartMin },
+              dog: m.dog,
+              owner: m.owner,
+            }))}
+            onDone={() => onOpenChange(false)}
+          />
         )}
       </DrawerContent>
     </Drawer>

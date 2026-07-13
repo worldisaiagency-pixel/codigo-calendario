@@ -1,3 +1,5 @@
+import type { WhatsAppTemplateMap } from "../whatsapp-template";
+
 export type Weekday =
   | "lunes"
   | "martes"
@@ -30,6 +32,15 @@ export interface BusinessProfile {
   services: BusinessService[];
   hours: Record<Weekday, DaySchedule | null>;
   vacations: VacationRange[];
+  /** Per-type custom WhatsApp templates (see src/lib/whatsapp-template.ts) —
+   * a type missing from this map (including every business created before
+   * this feature existed, or before a given type existed) means that type
+   * falls back to its official default; see resolveWhatsAppTemplate. */
+  whatsappTemplates?: WhatsAppTemplateMap;
+  /** Google Reviews (or equivalent) link used by the "appointmentReview"
+   * WhatsApp template's {review_link} variable — see whatsapp-template.ts.
+   * Empty until the business configures one. */
+  reviewLink?: string;
 }
 
 /** A logged-in business: identity from the Sheet plus its profile, also

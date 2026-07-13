@@ -1,4 +1,9 @@
-import { formatHoursCompact, formatServiceLine, formatVacationLine } from "./sheet-format";
+import {
+  formatHoursCompact,
+  formatServiceLine,
+  formatVacationLine,
+  formatWhatsAppTemplatesCell,
+} from "./sheet-format";
 import type { BusinessProfile } from "./types";
 
 /** Posts to the Netlify Function that forwards to the Apps Script Web App
@@ -47,8 +52,9 @@ async function postToSheetBridgeDetailed(body: Record<string, unknown>): Promise
   }
 }
 
-/** The business owner's own save — replaces services/hours/vacations,
- * leaves identity (negocio/usuario/web) untouched on the Sheet side. */
+/** The business owner's own save — replaces services/hours/vacations/
+ * WhatsApp template, leaves identity (negocio/usuario/web) untouched on the
+ * Sheet side. */
 export async function saveProfileToSheet(params: {
   negocio: string;
   usuario: string;
@@ -62,6 +68,8 @@ export async function saveProfileToSheet(params: {
     serviciosLines: profile.services.map(formatServiceLine),
     horarios: formatHoursCompact(profile.hours),
     vacacionesLines: profile.vacations.map(formatVacationLine),
+    whatsappTemplate: formatWhatsAppTemplatesCell(profile.whatsappTemplates ?? {}),
+    reviewLink: profile.reviewLink ?? "",
   });
 }
 
@@ -140,8 +148,8 @@ export async function createAppointmentInSheet(params: {
     servicio: params.service,
     cliente: params.ownerName,
     telefono: params.phone,
-    perro: params.dogName,
-    raza: params.breed,
+    elemento: params.dogName,
+    descripcion: params.breed,
     estado: params.status,
     origen: params.origin,
   });
@@ -169,7 +177,11 @@ export async function updateAppointmentInSheet(params: {
 }
 
 export async function deleteAppointmentFromSheet(params: { id: string }): Promise<boolean> {
-  return postToSheetBridge({ action: "deleteAppointment", id: params.id });
+  const result = await postToSheetBridgeDetailed({ action: "deleteAppointment", id: params.id });
+  // The desired end state — no such row in the Sheet — is already true here,
+  // so this isn't a real failure: it just means someone/something else
+  // (another device, a stale local copy) already removed it.
+  return result.ok || result.error === "appointment not found";
 }
 
 /** Writes a spontaneous schedule override (closure/hour change/block) to

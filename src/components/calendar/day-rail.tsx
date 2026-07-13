@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef } from "react";
 import { AppointmentBlock } from "./appointment-block";
 import { FreeSlotBlock } from "./free-slot-block";
 import { BlockedSlotBlock } from "./blocked-slot-block";
-import { ClosedSlotBlock } from "./closed-slot-block";
 import { NowLine } from "./now-line";
 import { nowMinutes } from "@/lib/time";
 import { minuteOffsetInRail, railLayout } from "@/lib/scale";
@@ -26,22 +25,32 @@ export function DayRail({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { tops, totalHeight } = useMemo(() => railLayout(blocks), [blocks]);
+  // Drop the non-interactive "closed" filler blocks buildRail pads the full
+  // day with — the rail only needs to render the business's effective
+  // working range (already resolved into `blocks` upstream via
+  // resolveDay/buildRail), so this is purely a render-layer trim, same
+  // pattern week-view.tsx already uses for its per-day summary bar.
+  const visibleBlocks = useMemo(() => blocks.filter((b) => b.kind !== "closed"), [blocks]);
+
+  const { tops, totalHeight } = useMemo(() => railLayout(visibleBlocks), [visibleBlocks]);
 
   const hourMarks = useMemo(() => {
     const marks: { label: string; top: number }[] = [];
-    if (!schedule) return marks;
-    for (let m = 0; m < 1440; m += 60) {
-      const top = minuteOffsetInRail(blocks, tops, m);
+    if (!schedule || visibleBlocks.length === 0) return marks;
+    const start = visibleBlocks[0].startMin;
+    const last = visibleBlocks[visibleBlocks.length - 1];
+    const end = last.startMin + last.durationMin;
+    for (let m = Math.ceil(start / 60) * 60; m <= end; m += 60) {
+      const top = minuteOffsetInRail(visibleBlocks, tops, m);
       if (top !== null) {
         marks.push({ label: String(Math.floor(m / 60)).padStart(2, "0"), top });
       }
     }
     return marks;
-  }, [blocks, tops, schedule]);
+  }, [visibleBlocks, tops, schedule]);
 
   const now = nowMinutes();
-  const nowTop = isToday ? minuteOffsetInRail(blocks, tops, now) : null;
+  const nowTop = isToday ? minuteOffsetInRail(visibleBlocks, tops, now) : null;
 
   useEffect(() => {
     if (!isToday || nowTop === null || !scrollRef.current) return;
@@ -50,7 +59,7 @@ export function DayRail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isToday]);
 
-  if (blocks.length === 0) {
+  if (visibleBlocks.length === 0) {
     return (
       <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
         <p className="text-[15px] font-medium text-foreground">
@@ -82,7 +91,7 @@ export function DayRail({
         </div>
 
         <div className="relative flex-1 flex flex-col gap-1.5">
-          {blocks.map((block, i) => {
+          {visibleBlocks.map((block, i) => {
             if (block.kind === "busy") {
               return (
                 <AppointmentBlock
@@ -94,9 +103,6 @@ export function DayRail({
             }
             if (block.kind === "blocked") {
               return <BlockedSlotBlock key={`blocked-${i}-${block.startMin}`} block={block} />;
-            }
-            if (block.kind === "closed") {
-              return <ClosedSlotBlock key={`closed-${i}-${block.startMin}`} block={block} />;
             }
             return (
               <FreeSlotBlock

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, PawPrint } from "lucide-react";
+import { Check, Loader2Icon, PawPrint } from "lucide-react";
 import {
   Drawer,
   DrawerContent,
@@ -16,6 +16,7 @@ import { durationLabel, formatDayHeading, minToLabel, parseDateKey } from "@/lib
 import { useAppStore } from "@/lib/store";
 import type { BusinessService } from "@/lib/data";
 import type { Dog } from "@/lib/types";
+import { NotifyClientsSheet, type NotifyRecipient } from "@/components/business/notify-clients-sheet";
 import { toast } from "sonner";
 
 export interface SlotContext {
@@ -46,6 +47,7 @@ export function NewAppointmentSheet({
   );
   const minServiceDuration =
     services.length > 0 ? Math.min(...services.map((s) => s.durationMin)) : FALLBACK_MIN_DURATION;
+  const business = useAppStore((s) => s.business);
   const dogs = useAppStore((s) => s.dogs);
   const owners = useAppStore((s) => s.owners);
   const addAppointment = useAppStore((s) => s.addAppointment);
@@ -58,7 +60,13 @@ export function NewAppointmentSheet({
   const [activeField, setActiveField] = useState<ActiveField>(null);
   const [service, setService] = useState<string>("");
   const [startOffset, setStartOffset] = useState(0);
+  const [customTimeOpen, setCustomTimeOpen] = useState(false);
   const ownerInputRef = useRef<HTMLInputElement>(null);
+
+  // "form" while filling in/saving the appointment, "notify" once it's been
+  // created — same two-step-in-one-Drawer shape as schedule-override-sheet.tsx.
+  const [step, setStep] = useState<"form" | "notify">("form");
+  const [notifyRecipient, setNotifyRecipient] = useState<NotifyRecipient | null>(null);
 
   const open = slot !== null;
 
@@ -83,6 +91,9 @@ export function NewAppointmentSheet({
         ? slot.preferredStartMin - slot.startMin
         : 0;
       setStartOffset(Math.max(0, preferredOffset));
+      setCustomTimeOpen(false);
+      setStep("form");
+      setNotifyRecipient(null);
     }
   }
 
@@ -107,6 +118,24 @@ export function NewAppointmentSheet({
   const clampedDuration = Math.min(activeDurationMin, availableAfterStart || activeDurationMin);
 
   const actualStartMin = slot ? slot.startMin + clampedStartOffset : 0;
+
+  // A custom time is just an offset that didn't come from a quick-pick
+  // button — same startOffset state, same clamp, same validation as
+  // above, so it's indistinguishable from a grid pick once applied.
+  const isCustomSelected = !timeOptions.includes(clampedStartOffset);
+
+  function applyCustomTime(hhmm: string) {
+    if (!slot) return;
+    const [hh, mm] = hhmm.split(":").map(Number);
+    if (Number.isNaN(hh) || Number.isNaN(mm)) return;
+    const offset = hh * 60 + mm - slot.startMin;
+    if (offset < 0 || offset > maxOffset) {
+      toast.error("Esa hora no está disponible en este hueco.");
+      return;
+    }
+    setStartOffset(offset);
+    setCustomTimeOpen(false);
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -209,7 +238,21 @@ export function NewAppointmentSheet({
     toast.success(`Cita guardada · ${dogName.trim()}`, {
       description: `${minToLabel(actualStartMin)} · ${durationLabel(clampedDuration)}`,
     });
-    onOpenChange(false);
+
+    // Read the store fresh rather than the dogs/owners captured at render
+    // time — addAppointment may have just inserted a brand-new dog/owner
+    // (matchedDog is null in that case), and those inserts happened after
+    // this render started.
+    const { appointment } = result;
+    const freshState = useAppStore.getState();
+    const dog = freshState.dogs.find((d) => d.id === appointment.dogId);
+    const owner = freshState.owners.find((o) => o.id === appointment.ownerId);
+    if (dog && owner) {
+      setNotifyRecipient({ appointment, dog, owner });
+      setStep("notify");
+    } else {
+      onOpenChange(false);
+    }
   }
 
   // The sheet keeps a fixed size and position regardless of the keyboard —
@@ -220,10 +263,28 @@ export function NewAppointmentSheet({
   const dayLabel = slot ? formatDayHeading(parseDateKey(slot.date)) : null;
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer
+      open={open}
+      // Ignore dismiss attempts (backdrop tap, handle drag, Escape) while
+      // saving — same guard as schedule-override-sheet.tsx's "confirming".
+      onOpenChange={(next) => {
+        if (saving) return;
+        onOpenChange(next);
+      }}
+    >
       <DrawerContent
         className="flex flex-col sm:max-w-md sm:mx-auto overflow-hidden"
       >
+        {step === "notify" && notifyRecipient && business && (
+          <NotifyClientsSheet
+            type="appointmentConfirmed"
+            business={business}
+            recipients={[notifyRecipient]}
+            onDone={() => onOpenChange(false)}
+          />
+        )}
+        {step === "form" && (
+          <>
         <DrawerHeader className="safe-top text-left pb-3 shrink-0">
           <DrawerTitle className="sr-only">Nueva cita</DrawerTitle>
           {slot && dayLabel && (
@@ -357,9 +418,32 @@ export function NewAppointmentSheet({
                 selected={clampedStartOffset}
                 onSelect={(o) => {
                   dismissKeyboard();
+                  setCustomTimeOpen(false);
                   setStartOffset(o);
                 }}
+                trailing={{
+                  label: isCustomSelected ? minToLabel(actualStartMin) : "Personalizar",
+                  active: isCustomSelected,
+                  onClick: () => {
+                    dismissKeyboard();
+                    setCustomTimeOpen((v) => !v);
+                  },
+                }}
               />
+              {customTimeOpen && (
+                <label className="block mt-2">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2 px-1">
+                    Hora personalizada
+                  </div>
+                  <input
+                    type="time"
+                    step={300}
+                    defaultValue={minToLabel(actualStartMin)}
+                    onChange={(e) => applyCustomTime(e.target.value)}
+                    className="tabular w-full h-12 rounded-2xl bg-secondary px-4 text-[16px]"
+                  />
+                </label>
+              )}
             </div>
           )}
         </div>
@@ -370,7 +454,7 @@ export function NewAppointmentSheet({
             disabled={!canSave || saving}
             onClick={handleSave}
             className={cn(
-              "w-full h-13 rounded-2xl text-[16px] font-semibold transition-all duration-150 active:scale-[0.985]",
+              "w-full h-13 flex items-center justify-center gap-2 rounded-2xl text-[16px] font-semibold transition-all duration-150 active:scale-[0.985]",
               canSave
                 ? "bg-primary text-primary-foreground"
                 : "bg-secondary text-muted-foreground",
@@ -378,9 +462,12 @@ export function NewAppointmentSheet({
             )}
             style={{ height: 52 }}
           >
+            {saving && <Loader2Icon className="size-4 animate-spin" />}
             {saving ? "Guardando…" : "Guardar cita"}
           </button>
         </div>
+          </>
+        )}
       </DrawerContent>
     </Drawer>
   );

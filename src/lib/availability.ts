@@ -13,6 +13,15 @@ export interface AvailabilitySlot {
 
 const SLOT_STEP_MIN = 30;
 
+// Upper bound on slots a range can possibly produce, used by callers that
+// need every slot in the range (allSlotsPerGap: true) so `limit` scales with
+// the requested date range instead of being a fixed count that silently
+// truncates the range once enough slots pile up in the first few days.
+// A day fully open 24h in SLOT_STEP_MIN increments is the worst case per day.
+export function maxSlotsForRange(days: number): number {
+  return Math.max(1, days) * Math.ceil((24 * 60) / SLOT_STEP_MIN);
+}
+
 // Walks forward day by day from `rangeStart`. Default mode takes only the
 // earliest bookable moment in each free gap — one result per gap (not every
 // 30-min increment inside it) keeps the internal "ver disponibilidad"

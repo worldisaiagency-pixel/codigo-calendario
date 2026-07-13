@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Loader2Icon } from "lucide-react";
 import {
   Drawer,
   DrawerContent,
@@ -45,7 +45,7 @@ export function BusinessCreateSheet({
   const canSave = negocio.trim().length > 0 && usuario.trim().length > 0;
 
   async function handleCreate() {
-    if (!canSave) return;
+    if (!canSave || saving) return;
     setSaving(true);
     const name = negocio.trim();
     const username = usuario.trim();
@@ -88,7 +88,13 @@ export function BusinessCreateSheet({
   }
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer
+      open={open}
+      onOpenChange={(next) => {
+        if (saving) return;
+        onOpenChange(next);
+      }}
+    >
       <DrawerContent className="flex flex-col sm:max-w-md sm:mx-auto overflow-hidden">
         <DrawerHeader className="safe-top text-left pb-3 shrink-0">
           <div className="pt-5">
@@ -195,7 +201,7 @@ export function BusinessCreateSheet({
                 onClick={handleCreate}
                 disabled={!canSave || saving}
                 className={cn(
-                  "w-full rounded-2xl text-[16px] font-semibold transition-all duration-150 active:scale-[0.985]",
+                  "w-full flex items-center justify-center gap-2 rounded-2xl text-[16px] font-semibold transition-all duration-150 active:scale-[0.985]",
                   canSave
                     ? "bg-primary text-primary-foreground"
                     : "bg-secondary text-muted-foreground",
@@ -203,6 +209,7 @@ export function BusinessCreateSheet({
                 )}
                 style={{ height: 52 }}
               >
+                {saving && <Loader2Icon className="size-4 animate-spin" />}
                 {saving ? "Creando…" : "Crear negocio"}
               </button>
             </div>

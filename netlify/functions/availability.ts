@@ -9,7 +9,7 @@
 import { sheetsProvider } from "../../src/lib/data/sheets-provider";
 import { fetchReservas } from "../../src/lib/data/reservas-sync";
 import { fetchOverrides } from "../../src/lib/data/overrides-sync";
-import { findAvailableSlots } from "../../src/lib/availability";
+import { findAvailableSlots, maxSlotsForRange } from "../../src/lib/availability";
 import { addDays } from "../../src/lib/time";
 import type { Appointment, Dog, Owner } from "../../src/lib/types";
 
@@ -100,7 +100,7 @@ const handler = async (req: Request) => {
     durationMin: service.durationMin,
     rangeStart: today,
     rangeEnd: addDays(today, days),
-    limit: 200,
+    limit: maxSlotsForRange(days),
     allSlotsPerGap: true,
   });
 

@@ -69,8 +69,9 @@ function jsonResponse(obj) {
 
 // --- Actions ---------------------------------------------------------------
 
-// The business owner's own save: replaces SERVICIOS/HORARIOS/VACACIONES,
-// preserves NEGOCIO/USUARIO/WEB exactly as they were in the sheet.
+// The business owner's own save: replaces SERVICIOS/HORARIOS/VACACIONES/
+// WHATSAPP_TEMPLATE, preserves NEGOCIO/USUARIO/WEB exactly as they were in
+// the sheet.
 function handleSaveProfile(sheet, body) {
   const negocio = String(body.negocio || "").trim();
   const usuario = String(body.usuario || "").trim();
@@ -91,6 +92,8 @@ function handleSaveProfile(sheet, body) {
     serviciosLines: body.serviciosLines || [],
     horarios: body.horarios || "",
     vacacionesLines: body.vacacionesLines || [],
+    whatsappTemplate: body.whatsappTemplate || "",
+    reviewLink: body.reviewLink || "",
   });
 
   replaceBlock(sheet, block, rows);
@@ -99,7 +102,8 @@ function handleSaveProfile(sheet, body) {
 }
 
 // Admin-only: renames a business and/or changes its website link. Preserves
-// SERVICIOS/HORARIOS/VACACIONES verbatim — this action never touches them.
+// SERVICIOS/HORARIOS/VACACIONES/WHATSAPP_TEMPLATE verbatim — this action
+// never touches them.
 function handleUpdateIdentity(sheet, body) {
   const oldNegocio = String(body.oldNegocio || "").trim();
   const oldUsuario = String(body.oldUsuario || "").trim();
@@ -126,6 +130,8 @@ function handleUpdateIdentity(sheet, body) {
     serviciosLinesRaw: preserved.servicios,
     horarios: preserved.horarios,
     vacacionesLinesRaw: preserved.vacaciones,
+    whatsappTemplate: preserved.whatsappTemplate,
+    reviewLink: preserved.reviewLink,
   });
 
   replaceBlock(sheet, block, rows);
@@ -134,7 +140,9 @@ function handleUpdateIdentity(sheet, body) {
 }
 
 // Admin-only: appends a brand-new, unconfigured business block at the end
-// of the sheet, ready for that business to log in and self-configure.
+// of the sheet, ready for that business to log in and self-configure. No
+// custom WHATSAPP_TEMPLATE — it uses DEFAULT_WHATSAPP_TEMPLATE (client-side)
+// until the business writes one of its own.
 function handleCreateBusiness(sheet, body) {
   const negocio = String(body.negocio || "").trim();
   const usuario = String(body.usuario || "").trim();
@@ -155,6 +163,8 @@ function handleCreateBusiness(sheet, body) {
     serviciosLines: [],
     horarios: "",
     vacacionesLines: [],
+    whatsappTemplate: "",
+    reviewLink: "",
   });
 
   const lastRow = sheet.getLastRow();
@@ -194,9 +204,14 @@ const RESERVAS_SHEET_NAME = "Reservas";
 // EMAIL/NOTAS are appended at the end (not inserted between existing
 // columns) so every index-based read already in place (reservas-sync.ts,
 // handleUpdateAppointment below) keeps working unchanged.
+// ELEMENTO/DESCRIPCION were PERRO/RAZA — renamed for businesses beyond dog
+// grooming (a physio's body area, a barber's nothing-in-particular, etc).
+// Purely cosmetic: every read/write below is positional (column index), so
+// sheets created before this rename keep their old header text and keep
+// working unchanged — nothing re-reads headers by name.
 const RESERVAS_HEADERS = [
   "ID", "NEGOCIO", "USUARIO", "FECHA", "INICIO_MIN", "DURACION_MIN",
-  "SERVICIO", "CLIENTE", "TELEFONO", "PERRO", "RAZA", "ESTADO", "ORIGEN",
+  "SERVICIO", "CLIENTE", "TELEFONO", "ELEMENTO", "DESCRIPCION", "ESTADO", "ORIGEN",
   "EMAIL", "NOTAS",
 ];
 
@@ -298,8 +313,10 @@ function handleCreateAppointment(identitySheet, body) {
       String(body.servicio || ""),
       String(body.cliente || ""),
       String(body.telefono || ""),
-      String(body.perro || ""),
-      String(body.raza || ""),
+      // "elemento"/"descripcion" are the current field names; "perro"/"raza"
+      // kept as a fallback so an un-updated caller still writes correctly.
+      String(body.elemento != null ? body.elemento : body.perro || ""),
+      String(body.descripcion != null ? body.descripcion : body.raza || ""),
       String(body.estado || "confirmed"),
       String(body.origen || "app"),
       String(body.email || ""),
@@ -775,16 +792,22 @@ function findBlock(data, negocio, usuario) {
   return { startRow: startIdx + 1, numRows: endIdx - startIdx, web: web };
 }
 
-// Reads back the SERVICIOS/HORARIOS/VACACIONES lines from a block's raw rows
-// so an identity-only update can rewrite the block without losing them.
+// Reads back the SERVICIOS/HORARIOS/VACACIONES/WHATSAPP_TEMPLATE lines from
+// a block's raw rows so an identity-only update can rewrite the block
+// without losing them.
 function extractPreservedLines(rawRows) {
   const servicios = [];
   const vacaciones = [];
   let horarios = "";
+  let whatsappTemplate = "";
+  let reviewLink = "";
   let current = null;
 
   for (const row of rawRows) {
     const label = String(row[0] || "").trim().toUpperCase();
+    // WHATSAPP_TEMPLATE is a single cell that may itself contain newlines
+    // (Sheets cells support that natively) — trim outer whitespace only,
+    // same as HORARIOS, never split it into lines.
     const value = String(row[1] || "").trim();
 
     if (label === "NEGOCIO" || label === "USUARIO" || label === "WEB") {
@@ -806,18 +829,37 @@ function extractPreservedLines(rawRows) {
       if (value) vacaciones.push(value);
       continue;
     }
+    if (label === "WHATSAPP_TEMPLATE") {
+      current = null;
+      whatsappTemplate = value;
+      continue;
+    }
+    if (label === "REVIEW_LINK") {
+      current = null;
+      reviewLink = value;
+      continue;
+    }
     if (!label && current === "servicios" && value) servicios.push(value);
     if (!label && current === "vacaciones" && value) vacaciones.push(value);
   }
 
-  return { servicios: servicios, horarios: horarios, vacaciones: vacaciones };
+  return {
+    servicios: servicios,
+    horarios: horarios,
+    vacaciones: vacaciones,
+    whatsappTemplate: whatsappTemplate,
+    reviewLink: reviewLink,
+  };
 }
 
 // Builds the standard 2-column row block: NEGOCIO/USUARIO/WEB, then
-// SERVICIOS (one row per line), HORARIOS, then VACACIONES (one row per
-// line). Accepts either freshly-formatted lines (serviciosLines/
-// vacacionesLines) or already-existing lines to keep verbatim
-// (serviciosLinesRaw/vacacionesLinesRaw), used when only identity changed.
+// SERVICIOS (one row per line), HORARIOS, VACACIONES (one row per line),
+// then WHATSAPP_TEMPLATE (a single cell — Sheets cells support embedded
+// newlines natively, so the whole multi-line template lives in one row,
+// unlike SERVICIOS/VACACIONES which are one row per array item). Accepts
+// either freshly-formatted lines (serviciosLines/vacacionesLines) or
+// already-existing lines to keep verbatim (serviciosLinesRaw/
+// vacacionesLinesRaw), used when only identity changed.
 function buildBlockRows(opts) {
   const rows = [];
   rows.push(["NEGOCIO", opts.negocio]);
@@ -843,6 +885,9 @@ function buildBlockRows(opts) {
       rows.push([i === 0 ? "VACACIONES" : "", line]);
     });
   }
+
+  rows.push(["WHATSAPP_TEMPLATE", opts.whatsappTemplate || ""]);
+  rows.push(["REVIEW_LINK", opts.reviewLink || ""]);
 
   return rows;
 }

@@ -268,7 +268,7 @@ export default function Home() {
         <WorldworkFooter />
       </div>
 
-      <DesktopSidePanel context={clientContext} />
+      <DesktopSidePanel context={clientContext} onCancelled={() => setClientContext(null)} />
 
       <NewAppointmentSheet
         slot={freeSlot}

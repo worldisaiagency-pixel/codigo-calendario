@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { ExternalLink, Loader2Icon, Plus, Trash2 } from "lucide-react";
 import {
   Drawer,
   DrawerContent,
@@ -14,6 +14,13 @@ import { useAppStore } from "@/lib/store";
 import { WEEKDAYS, emptyProfile } from "@/lib/data";
 import type { BusinessService, DaySchedule, VacationRange, Weekday } from "@/lib/data";
 import { toDateKey } from "@/lib/time";
+import {
+  resolveWhatsAppTemplate,
+  WHATSAPP_TEMPLATE_DEFINITIONS,
+  WHATSAPP_TEMPLATE_VARIABLES,
+  type WhatsAppTemplateType,
+} from "@/lib/whatsapp-template";
+import { WhatsAppTemplateField } from "./whatsapp-template-field";
 import { toast } from "sonner";
 
 const WEEKDAY_LABELS: Record<Weekday, string> = {
@@ -52,6 +59,11 @@ export function ProfileSheet({
   const [vacations, setVacations] = useState<VacationRange[]>([]);
   const [vacStart, setVacStart] = useState("");
   const [vacEnd, setVacEnd] = useState("");
+  // One entry per WHATSAPP_TEMPLATE_DEFINITIONS type — adding a new
+  // template type needs no change here, the load/save loops below already
+  // cover whatever WHATSAPP_TEMPLATE_DEFINITIONS contains.
+  const [whatsappTemplates, setWhatsappTemplates] = useState<Record<string, string>>({});
+  const [reviewLink, setReviewLink] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Load the current profile into local edit state every time the sheet is
@@ -65,6 +77,16 @@ export function ProfileSheet({
       setVacations(business.vacations);
       setVacStart("");
       setVacEnd("");
+      // Shown resolved (falls back to each type's official default) so the
+      // editor never opens on an empty box — a business that's never
+      // customized a template still sees exactly the message that's
+      // actually being sent today.
+      const resolvedTemplates: Record<string, string> = {};
+      for (const def of WHATSAPP_TEMPLATE_DEFINITIONS) {
+        resolvedTemplates[def.type] = resolveWhatsAppTemplate(business.whatsappTemplates, def.type);
+      }
+      setWhatsappTemplates(resolvedTemplates);
+      setReviewLink(business.reviewLink ?? "");
     }
   }
 
@@ -102,9 +124,23 @@ export function ProfileSheet({
   }
 
   async function handleSave() {
+    if (saving) return;
     const cleanServices = services.filter((s) => s.name.trim().length > 0);
     setSaving(true);
-    const ok = await updateProfile({ services: cleanServices, hours, vacations });
+    const cleanWhatsappTemplates: Record<WhatsAppTemplateType, string> = {} as Record<
+      WhatsAppTemplateType,
+      string
+    >;
+    for (const def of WHATSAPP_TEMPLATE_DEFINITIONS) {
+      cleanWhatsappTemplates[def.type] = (whatsappTemplates[def.type] ?? "").trim();
+    }
+    const ok = await updateProfile({
+      services: cleanServices,
+      hours,
+      vacations,
+      whatsappTemplates: cleanWhatsappTemplates,
+      reviewLink: reviewLink.trim(),
+    });
     setSaving(false);
     if (ok) {
       toast.success("Perfil guardado", {
@@ -121,7 +157,13 @@ export function ProfileSheet({
   const todayKey = toDateKey(new Date());
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer
+      open={open}
+      onOpenChange={(next) => {
+        if (saving) return;
+        onOpenChange(next);
+      }}
+    >
       <DrawerContent className="flex flex-col sm:max-w-md sm:mx-auto overflow-hidden">
         <DrawerHeader className="safe-top text-left pb-3 shrink-0">
           <div className="pt-5">
@@ -289,6 +331,67 @@ export function ProfileSheet({
               </div>
             </div>
           </div>
+
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2 px-1">
+              Enlace de reseñas
+            </div>
+            <div className="flex items-center gap-2 mb-6">
+              <Input
+                value={reviewLink}
+                onChange={(e) => setReviewLink(e.target.value)}
+                placeholder="https://g.page/r/..."
+                className="h-12 text-[15px] rounded-2xl bg-secondary border-0 px-4 flex-1"
+                autoComplete="off"
+                inputMode="url"
+              />
+              <button
+                type="button"
+                onClick={() => window.open(reviewLink.trim(), "_blank", "noopener,noreferrer")}
+                disabled={!reviewLink.trim()}
+                aria-label="Comprobar enlace"
+                className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-secondary text-foreground/70 transition-transform duration-150 active:scale-95 active:bg-accent disabled:opacity-40"
+              >
+                <ExternalLink className="size-[18px]" strokeWidth={2} />
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-2 px-1">
+              Plantillas de WhatsApp
+            </div>
+            <div className="rounded-2xl bg-secondary/60 px-4 py-3 mb-4">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">
+                Variables disponibles
+              </div>
+              <div className="flex flex-col gap-1">
+                {WHATSAPP_TEMPLATE_VARIABLES.map((v) => (
+                  <div key={v.key} className="flex items-baseline gap-2 text-[12.5px]">
+                    <span className="tabular font-medium text-foreground/80 shrink-0">
+                      {`{${v.key}}`}
+                    </span>
+                    <span className="text-muted-foreground">{v.description}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-6">
+              {WHATSAPP_TEMPLATE_DEFINITIONS.map((def) => (
+                <WhatsAppTemplateField
+                  key={def.type}
+                  definition={def}
+                  value={whatsappTemplates[def.type] ?? def.defaultTemplate}
+                  onChange={(value) =>
+                    setWhatsappTemplates((prev) => ({ ...prev, [def.type]: value }))
+                  }
+                  businessName={business?.name ?? ""}
+                  reviewLink={reviewLink}
+                />
+              ))}
+            </div>
+          </div>
         </div>
 
         <div
@@ -299,9 +402,10 @@ export function ProfileSheet({
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="w-full rounded-2xl text-[16px] font-semibold bg-primary text-primary-foreground transition-all duration-150 active:scale-[0.985] disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-2 rounded-2xl text-[16px] font-semibold bg-primary text-primary-foreground transition-all duration-150 active:scale-[0.985] disabled:opacity-60"
             style={{ height: 52 }}
           >
+            {saving && <Loader2Icon className="size-4 animate-spin" />}
             {saving ? "Guardando…" : "Guardar"}
           </button>
         </div>

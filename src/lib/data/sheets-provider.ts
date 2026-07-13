@@ -9,6 +9,26 @@ import type {
   Weekday,
 } from "./types";
 import type { DataProvider } from "./provider";
+import type { WhatsAppTemplateMap } from "../whatsapp-template";
+
+/** Parses the WHATSAPP_TEMPLATE cell — a JSON-encoded { type: text } map
+ * since the multi-template feature, but businesses that customized their
+ * (then-only) template before that still have the raw prose text sitting in
+ * that same cell. JSON.parse throws on that legacy text, so the catch
+ * treats the whole cell as the old single "appointmentChanged" template —
+ * exactly what it always meant before this feature existed. */
+function parseWhatsAppTemplatesCell(raw: string): WhatsAppTemplateMap {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as WhatsAppTemplateMap;
+    }
+  } catch {
+    // Not JSON — legacy single-template format, handled below.
+  }
+  return { appointmentChanged: raw };
+}
 
 function stripAccents(s: string): string {
   return s.normalize("NFD").replace(/\p{Diacritic}/gu, "");
@@ -176,6 +196,13 @@ function toBusiness(block: Map<string, string[]>): Business | null {
   const hours = parseHours((block.get("HORARIOS") ?? []).join(", "));
   const vacations = (block.get("VACACIONES") ?? []).flatMap(parseVacationLine);
   const websiteUrl = (block.get("WEB") ?? [])[0]?.trim() ?? "";
+  // Single cell (Sheets cells support embedded newlines natively, and
+  // parseCsv already preserves them inside a quoted field) holding every
+  // template type as one JSON object — see parseWhatsAppTemplatesCell.
+  const whatsappTemplates = parseWhatsAppTemplatesCell(
+    (block.get("WHATSAPP_TEMPLATE") ?? [])[0]?.trim() ?? ""
+  );
+  const reviewLink = (block.get("REVIEW_LINK") ?? [])[0]?.trim() ?? "";
 
   return {
     id: slug(`${negocio}__${usuario}`),
@@ -185,6 +212,8 @@ function toBusiness(block: Map<string, string[]>): Business | null {
     services,
     hours,
     vacations,
+    whatsappTemplates,
+    reviewLink,
   };
 }
 

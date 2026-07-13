@@ -1,6 +1,8 @@
 "use client";
 
+import { Loader2Icon } from "lucide-react";
 import { DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+import { cn } from "@/lib/utils";
 import { formatDayHeading, minToLabel, parseDateKey } from "@/lib/time";
 import type { ScheduleOverride } from "@/lib/data";
 import type { ScheduleChangePlan } from "@/lib/rebooking";
@@ -21,11 +23,13 @@ function describePending(o: ScheduleOverride): string {
 export function ScheduleChangeSummary({
   pendingOverrides,
   plan,
+  confirming,
   onConfirm,
   onBack,
 }: {
   pendingOverrides: ScheduleOverride[];
   plan: ScheduleChangePlan;
+  confirming: boolean;
   onConfirm: () => void;
   onBack: () => void;
 }) {
@@ -114,7 +118,8 @@ export function ScheduleChangeSummary({
         <button
           type="button"
           onClick={onBack}
-          className="flex-1 rounded-2xl text-[15px] font-medium bg-secondary text-foreground/80 transition-all duration-150 active:scale-[0.985]"
+          disabled={confirming}
+          className="flex-1 rounded-2xl text-[15px] font-medium bg-secondary text-foreground/80 transition-all duration-150 active:scale-[0.985] disabled:opacity-50"
           style={{ height: 52 }}
         >
           Volver
@@ -122,12 +127,22 @@ export function ScheduleChangeSummary({
         <button
           type="button"
           onClick={onConfirm}
-          className="flex-1 rounded-2xl text-[16px] font-semibold bg-primary text-primary-foreground transition-all duration-150 active:scale-[0.985]"
+          disabled={confirming}
+          className={cn(
+            "flex-1 flex items-center justify-center gap-2 rounded-2xl text-[16px] font-semibold bg-primary text-primary-foreground transition-all duration-150 active:scale-[0.985]",
+            confirming && "opacity-80"
+          )}
           style={{ height: 52 }}
         >
-          Confirmar cambios
+          {confirming && <Loader2Icon className="size-4 animate-spin" />}
+          {confirming ? "Reprogramando citas…" : "Confirmar cambios"}
         </button>
       </div>
+      {confirming && (
+        <p className="shrink-0 px-4 pb-3 text-center text-[12px] text-muted-foreground bg-popover">
+          Esto puede tardar unos segundos.
+        </p>
+      )}
     </>
   );
 }

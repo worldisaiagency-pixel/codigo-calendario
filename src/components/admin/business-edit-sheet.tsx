@@ -1,13 +1,22 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, Loader2Icon } from "lucide-react";
 import {
   Drawer,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { updateBusinessIdentity, deleteBusinessFromSheet } from "@/lib/data";
@@ -56,7 +65,7 @@ export function BusinessEditSheet({
   const canSave = negocio.trim().length > 0 && usuario.trim().length > 0;
 
   async function handleSave() {
-    if (!business || !canSave) return;
+    if (!business || !canSave || saving) return;
     setSaving(true);
     const ok = await updateBusinessIdentity({
       oldNegocio: business.name,
@@ -100,11 +109,7 @@ export function BusinessEditSheet({
   }
 
   async function handleDelete() {
-    if (!business) return;
-    if (!confirmingDelete) {
-      setConfirmingDelete(true);
-      return;
-    }
+    if (!business || saving) return;
     setSaving(true);
     const ok = await deleteBusinessFromSheet({
       negocio: business.name,
@@ -113,6 +118,7 @@ export function BusinessEditSheet({
     setSaving(false);
     if (ok) {
       toast.success("Negocio eliminado");
+      setConfirmingDelete(false);
       onDeleted();
       onOpenChange(false);
     } else {
@@ -123,7 +129,13 @@ export function BusinessEditSheet({
   }
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
+    <Drawer
+      open={open}
+      onOpenChange={(next) => {
+        if (saving) return;
+        onOpenChange(next);
+      }}
+    >
       <DrawerContent className="flex flex-col sm:max-w-md sm:mx-auto overflow-hidden">
         <DrawerHeader className="safe-top text-left pb-3 shrink-0">
           <div className="pt-5">
@@ -205,16 +217,11 @@ export function BusinessEditSheet({
 
           <button
             type="button"
-            onClick={handleDelete}
+            onClick={() => setConfirmingDelete(true)}
             disabled={saving}
-            className={cn(
-              "w-full rounded-2xl py-3 text-[14px] font-medium transition-colors duration-150 active:scale-[0.98]",
-              confirmingDelete
-                ? "bg-destructive text-white"
-                : "bg-slot-alert-tint text-slot-alert"
-            )}
+            className="w-full rounded-2xl py-3 text-[14px] font-medium transition-colors duration-150 active:scale-[0.98] bg-slot-alert-tint text-slot-alert"
           >
-            {confirmingDelete ? "¿Seguro? Toca de nuevo para eliminar" : "Eliminar negocio"}
+            Eliminar negocio
           </button>
         </div>
 
@@ -227,7 +234,7 @@ export function BusinessEditSheet({
             onClick={handleSave}
             disabled={!canSave || saving}
             className={cn(
-              "w-full rounded-2xl text-[16px] font-semibold transition-all duration-150 active:scale-[0.985]",
+              "w-full flex items-center justify-center gap-2 rounded-2xl text-[16px] font-semibold transition-all duration-150 active:scale-[0.985]",
               canSave
                 ? "bg-primary text-primary-foreground"
                 : "bg-secondary text-muted-foreground",
@@ -235,10 +242,38 @@ export function BusinessEditSheet({
             )}
             style={{ height: 52 }}
           >
+            {saving && <Loader2Icon className="size-4 animate-spin" />}
             {saving ? "Guardando…" : "Guardar cambios"}
           </button>
         </div>
       </DrawerContent>
+
+      <Dialog
+        open={confirmingDelete}
+        onOpenChange={(next) => {
+          if (saving) return;
+          setConfirmingDelete(next);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Eliminar {business?.name}?</DialogTitle>
+            <DialogDescription>
+              Se eliminará su configuración (servicios, horarios, vacaciones, plantillas) de la
+              hoja. Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" disabled={saving} onClick={() => setConfirmingDelete(false)}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" disabled={saving} onClick={handleDelete}>
+              {saving && <Loader2Icon className="size-4 animate-spin" />}
+              {saving ? "Eliminando…" : "Eliminar negocio"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Drawer>
   );
 }

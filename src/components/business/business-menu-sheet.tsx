@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { CalendarClock, LogOut, Moon, Sun, Trash2, UserCog } from "lucide-react";
 import {
   Drawer,
@@ -7,6 +8,15 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@/components/ui/drawer";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/lib/store";
 import { formatDayHeading, minToLabel, parseDateKey } from "@/lib/time";
@@ -45,6 +55,12 @@ export function BusinessMenuSheet({
   const { isDark, toggle: toggleTheme, mounted: themeMounted } = useThemeToggle();
 
   const upcoming = [...scheduleOverrides].sort((a, b) => (a.date < b.date ? -1 : 1));
+
+  // Removing an active override immediately changes real availability (a
+  // closed day reopens, a blocked range frees up) — worth a confirmation,
+  // same lightweight Dialog pattern as archiving a client or cancelling an
+  // appointment, unlike the draft-only edits in ProfileSheet below.
+  const [pendingRemoval, setPendingRemoval] = useState<ScheduleOverride | null>(null);
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
@@ -134,7 +150,7 @@ export function BusinessMenuSheet({
                       </div>
                       <button
                         type="button"
-                        onClick={() => removeScheduleOverride(o.id)}
+                        onClick={() => setPendingRemoval(o)}
                         aria-label="Quitar este cambio de horario"
                         className="flex size-8 items-center justify-center rounded-full text-muted-foreground shrink-0 active:bg-accent transition-colors"
                       >
@@ -148,6 +164,40 @@ export function BusinessMenuSheet({
           )}
         </div>
       </DrawerContent>
+
+      <Dialog open={pendingRemoval !== null} onOpenChange={(next) => !next && setPendingRemoval(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¿Quitar este cambio de horario?</DialogTitle>
+            <DialogDescription>
+              {pendingRemoval && (
+                <>
+                  El horario de{" "}
+                  {(() => {
+                    const { weekday, day, month } = formatDayHeading(parseDateKey(pendingRemoval.date));
+                    return `${weekday} ${day} ${month}`;
+                  })()}{" "}
+                  volverá a ser el habitual.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRemoval(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                if (pendingRemoval) removeScheduleOverride(pendingRemoval.id);
+                setPendingRemoval(null);
+              }}
+            >
+              Quitar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Drawer>
   );
 }

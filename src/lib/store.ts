@@ -57,7 +57,11 @@ interface AppState {
   addAppointment: (
     input: NewAppointmentInput
   ) => Promise<{ ok: true; appointment: Appointment } | { ok: false; error: string }>;
-  removeAppointment: (id: string) => void;
+  /** Same await-then-rollback shape as addAppointment/updateAppointment:
+   * removes locally right away, then awaits the Sheet delete. If that write
+   * fails, the appointment is re-inserted locally instead of leaving the
+   * calendar permanently missing something the Sheet still has. */
+  removeAppointment: (id: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   /** Same await-then-rollback shape as addAppointment: applies the patch
    * locally right away, then awaits the Sheet write (which re-checks for
    * overlaps against every OTHER appointment when date/time actually
@@ -73,6 +77,11 @@ interface AppState {
    * (a booking made on the website, or by this business on another device)
    * into the local tables — a no-op if that id is already present. */
   mergeRemoteAppointment: (row: PendingReserva) => void;
+  /** Archives a client's ficha (dog+owner) out of the search buscador — see
+   * src/lib/clients.ts. Never touches the dog/owner rows themselves or any
+   * appointment, so calendar history keeps rendering normally; the ficha
+   * reappears on its own the next time this dog gets a new appointment. */
+  archiveClient: (dogId: string) => void;
   /** Same idempotent-import shape as mergeRemoteAppointment, for the shared
    * "Overrides" sheet — a closure/hour change made on another device. */
   mergeRemoteOverride: (override: ScheduleOverride) => void;
@@ -209,6 +218,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
     }
 
+    // Booking (or re-booking) for an existing dog brings its ficha back to
+    // the search buscador if it had been archived — restored below if the
+    // Sheet ends up rejecting this appointment.
+    const wasArchived = dogsTable.list().find((d) => d.id === dogId)?.archived === true;
+    if (wasArchived) dogsTable.update(dogId, { archived: false });
+
     // A real (not per-device-counter) id: this appointment's id is also the
     // key it's written to the shared Reservas sheet under, so it must not
     // collide with one generated on a different device.
@@ -257,15 +272,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       appointmentsTable.remove(newAppt.id);
       if (insertedDogId) dogsTable.remove(insertedDogId);
       if (insertedOwnerId) ownersTable.remove(insertedOwnerId);
+      else if (wasArchived) dogsTable.update(dogId, { archived: true });
       return { ok: false, error: result.error ?? "write_failed" };
     }
 
     return { ok: true, appointment: newAppt };
   },
 
-  removeAppointment: (id) => {
+  removeAppointment: async (id) => {
+    const before = get().appointments.find((a) => a.id === id);
     appointmentsTable?.remove(id);
-    deleteAppointmentFromSheet({ id });
+
+    let ok: boolean;
+    try {
+      ok = await deleteAppointmentFromSheet({ id });
+    } catch {
+      ok = false;
+    }
+
+    if (!ok) {
+      if (before) appointmentsTable?.insert(before);
+      return { ok: false, error: "write_failed" };
+    }
+    return { ok: true };
   },
 
   updateAppointment: async (id, patch) => {
@@ -316,6 +345,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         avgDurationMin: row.durationMin,
       };
       dogsTable.insert(dog);
+    } else if (dog.archived) {
+      // A booking made elsewhere (the public website, another device) for a
+      // previously archived ficha brings it back to the search buscador too.
+      dogsTable.update(dog.id, { archived: false });
     }
 
     appointmentsTable.insert({
@@ -328,6 +361,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       service: row.service,
       status: row.status,
     });
+  },
+
+  archiveClient: (dogId) => {
+    dogsTable?.update(dogId, { archived: true });
   },
 
   mergeRemoteOverride: (override) => {

@@ -8,12 +8,14 @@ import { ServicePicker } from "@/components/appointment/service-picker";
 import { cn } from "@/lib/utils";
 import { dataProvider, fetchReservas, fetchOverrides, createAppointmentInSheet } from "@/lib/data";
 import type { Business, ScheduleOverride } from "@/lib/data";
-import { findAvailableSlots, type AvailabilitySlot } from "@/lib/availability";
+import { findAvailableSlots, maxSlotsForRange, type AvailabilitySlot } from "@/lib/availability";
 import { addDays, durationLabel, formatDayHeading, minToLabel, parseDateKey } from "@/lib/time";
 import type { Appointment, Dog, Owner } from "@/lib/types";
 
 type LoadState = "loading" | "ready" | "not-found" | "error";
 type SubmitState = "idle" | "submitting" | "done" | "error";
+
+const DAYS_AHEAD = 45;
 
 export function ReservarClient() {
   const params = useSearchParams();
@@ -151,8 +153,8 @@ function BookingForm({
       ownerById: emptyOwnerById,
       durationMin,
       rangeStart: today,
-      rangeEnd: addDays(today, 45),
-      limit: 40,
+      rangeEnd: addDays(today, DAYS_AHEAD),
+      limit: maxSlotsForRange(DAYS_AHEAD),
       allSlotsPerGap: true,
     });
   }, [business, service, liveAppointments, scheduleOverrides, serviceDurationMin]);
